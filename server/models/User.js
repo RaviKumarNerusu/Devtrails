@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6 },
     role: { type: String, enum: ["partner", "insurer", "admin"], default: "partner", index: true },
     riskScore: { type: Number, default: 0 },
+    risk_score: { type: Number, default: 0 },
+    wallet_balance: { type: Number, default: 0 },
     claimHistoryCount: { type: Number, default: 0 },
     safeDays: { type: Number, default: 0 },
     location: { type: String, trim: true, default: "" },
@@ -28,11 +30,10 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
 });
 
 userSchema.methods.matchPassword = async function (enteredPassword) {

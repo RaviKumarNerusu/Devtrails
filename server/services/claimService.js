@@ -1,7 +1,12 @@
 const Claim = require("../models/Claim");
 const Policy = require("../models/Policy");
+const User = require("../models/User");
 const PartnerProfile = require("../models/PartnerProfile");
 const { fetchCurrentWeather } = require("./openWeatherService");
+const { getRiskScore } = require("./mlService");
+const { getFraudScore } = require("./fraudService");
+const { calculatePremium } = require("../utils/premiumCalculator");
+const { simulateClaimPayout } = require("./payoutService");
 const {
   extractRainSafely,
   getLocalDateOnly,
@@ -31,6 +36,12 @@ function buildAuditEntry(action, details) {
 
 function isClaimEligibleStatus(status) {
   return CLAIMED_FLOW_STATUSES.has(normalizeStatus(status));
+}
+
+function inferLocationRisk(city) {
+  const value = String(city || "").toLowerCase();
+  const highRisk = ["industrial", "flood", "coastal", "lowland", "high-risk", "high_risk_area", "flood_zone"];
+  return highRisk.some((item) => value.includes(item)) ? 0.8 : 0.2;
 }
 
 async function collapseDuplicateDailyClaims(userId, claimDate) {
@@ -87,10 +98,13 @@ async function upsertDailyClaimRecord({
   payoutAmount,
   maxPayoutAmount,
   autoTriggered = true,
-  triggerType = "weather"
+  triggerType = "weather",
+  riskScore = 0,
+  fraudScore = 0,
+  forceStatus = null
 }) {
   const claimDate = getLocalDateOnly();
-  const nextStatus = eligible ? "eligible" : "not_eligible";
+  const nextStatus = forceStatus || (eligible ? "eligible" : "not_eligible");
   const existingClaim = await Claim.findOne({ userId, date: claimDate });
 
   if (existingClaim && TERMINAL_STATUSES.has(normalizeStatus(existingClaim.status))) {
@@ -115,6 +129,9 @@ async function upsertDailyClaimRecord({
     maxPayoutAmount: Number.isFinite(Number(maxPayoutAmount)) ? Number(maxPayoutAmount) : 0,
     autoTriggered,
     triggerType,
+    trigger_type: triggerType,
+    risk_score: Number.isFinite(Number(riskScore)) ? Number(riskScore) : 0,
+    fraud_score: Number.isFinite(Number(fraudScore)) ? Number(fraudScore) : 0,
     status: nextStatus
   };
 
@@ -132,6 +149,9 @@ async function upsertDailyClaimRecord({
         maxPayoutAmount: Number.isFinite(Number(maxPayoutAmount)) ? Number(maxPayoutAmount) : 0,
         autoTriggered,
         triggerType,
+        trigger_type: triggerType,
+        risk_score: Number.isFinite(Number(riskScore)) ? Number(riskScore) : 0,
+        fraud_score: Number.isFinite(Number(fraudScore)) ? Number(fraudScore) : 0,
         status: nextStatus,
         auditLogs: [auditEntry]
       });
@@ -178,6 +198,31 @@ async function evaluateClaimEligibility(user) {
   const rainMm = extractRainSafely(currentWeather, 1);
   validateWeatherData(rainMm, threshold);
   const eligible = rainMm >= threshold;
+
+  const pastClaims = await Claim.countDocuments({ userId: user._id });
+  const mlInput = {
+    temperature: Number(currentWeather?.main?.temp ?? 0) || 0,
+    rainfall: rainMm,
+    aqi: Number(currentWeather?.main?.aqi ?? currentWeather?.aqi ?? 50) || 50,
+    past_claims: pastClaims,
+    location_risk: inferLocationRisk(city)
+  };
+  const riskScore = await getRiskScore(mlInput);
+  const fraudResult = await getFraudScore({
+    userId: user._id,
+    rainMm,
+    threshold,
+    triggeredByWeather: eligible,
+    isAutoTriggered: true
+  });
+  const weeklyPremium = calculatePremium(riskScore);
+
+  await Promise.all([
+    User.findByIdAndUpdate(user._id, { $set: { riskScore: riskScore, risk_score: riskScore } }),
+    Policy.updateOne({ userId: user._id, isActive: true }, { $set: { weekly_premium: weeklyPremium } })
+  ]);
+
+  const forceStatus = fraudResult.should_reject ? "rejected" : null;
   const claim = await upsertDailyClaimRecord({
     userId: user._id,
     city,
@@ -189,7 +234,10 @@ async function evaluateClaimEligibility(user) {
     payoutAmount: 0,
     maxPayoutAmount: 0,
     autoTriggered: true,
-    triggerType: "weather"
+    triggerType: "weather",
+    riskScore,
+    fraudScore: fraudResult.fraud_score,
+    forceStatus
   });
 
   logger.info("Claim eligibility evaluated", {
@@ -206,10 +254,45 @@ async function evaluateClaimEligibility(user) {
     city,
     rainMm,
     threshold,
+    riskScore,
+    fraudScore: fraudResult.fraud_score,
+    weeklyPremium,
     eligible,
     status: claim?.status || (eligible ? "eligible" : "not_eligible"),
     claim
   };
+}
+
+async function approveAndPayoutClaim(userId, claim) {
+  if (!claim || claim.status !== "eligible") {
+    return claim;
+  }
+
+  const approvedAt = new Date();
+  const approvedClaim = await Claim.findByIdAndUpdate(
+    claim._id,
+    {
+      $set: {
+        status: "approved",
+        approvedAt
+      },
+      $push: {
+        auditLogs: buildAuditEntry("CLAIM_AUTO_APPROVED", {
+          approvedAt,
+          source: "trigger-engine"
+        })
+      }
+    },
+    { new: true }
+  );
+
+  await simulateClaimPayout({
+    claimId: approvedClaim._id,
+    userId,
+    payoutAmount: approvedClaim.payoutAmount
+  });
+
+  return approvedClaim;
 }
 
 async function redeemEligibleClaim(user, claimId = null) {
@@ -258,7 +341,7 @@ async function redeemEligibleClaim(user, claimId = null) {
     }
 
     const approvedAt = new Date();
-    return Claim.findByIdAndUpdate(
+    const approvedClaim = await Claim.findByIdAndUpdate(
       claim._id,
       {
         $set: {
@@ -273,6 +356,15 @@ async function redeemEligibleClaim(user, claimId = null) {
       },
       { new: true, session }
     );
+
+    await simulateClaimPayout({
+      claimId: approvedClaim._id,
+      userId: user._id,
+      payoutAmount: approvedClaim.payoutAmount,
+      session
+    });
+
+    return approvedClaim;
   });
 
   logger.info("Claim redeemed and approved", {
@@ -284,6 +376,32 @@ async function redeemEligibleClaim(user, claimId = null) {
   });
 
   return approvedClaim;
+}
+
+async function createAutoTriggeredClaim(user, triggerType = "weather") {
+  const result = await evaluateClaimEligibility(user);
+  if (!result?.claim) {
+    return result;
+  }
+
+  if (result.claim.status === "eligible") {
+    result.claim = await approveAndPayoutClaim(user._id, result.claim);
+    result.status = result.claim.status;
+  }
+
+  if (result.claim.status === "approved") {
+    result.eligible = true;
+  }
+
+  if (triggerType && result.claim.trigger_type !== triggerType) {
+    result.claim = await Claim.findByIdAndUpdate(
+      result.claim._id,
+      { $set: { triggerType, trigger_type: triggerType } },
+      { new: true }
+    );
+  }
+
+  return result;
 }
 
 async function listClaimsForUser(userId) {
@@ -349,6 +467,7 @@ module.exports = {
   getActivePolicyOrThrow,
   upsertDailyClaimRecord,
   evaluateClaimEligibility,
+  createAutoTriggeredClaim,
   redeemEligibleClaim,
   listClaimsForUser,
   listClaimsForInsurer

@@ -24,6 +24,9 @@ const claimSchema = new mongoose.Schema(
     maxPayoutAmount: { type: Number, default: 0, min: 0 }, // Capped payout
     autoTriggered: { type: Boolean, default: true },
     triggerType: { type: String, enum: ["weather", "time", "location", "event"], default: "weather" },
+    trigger_type: { type: String, default: "weather" },
+    risk_score: { type: Number, default: 0, min: 0, max: 1 },
+    fraud_score: { type: Number, default: 0, min: 0, max: 1 },
     status: {
       type: String,
       enum: ["not_eligible", "eligible", "claimed", "approved", "rejected"],

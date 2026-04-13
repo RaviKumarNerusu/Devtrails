@@ -1,3 +1,11 @@
+const cron = require("node-cron");
+const Policy = require("../models/Policy");
+const User = require("../models/User");
+const PartnerProfile = require("../models/PartnerProfile");
+const { fetchCurrentWeather } = require("./openWeatherService");
+const { createAutoTriggeredClaim } = require("./claimService");
+const logger = require("../utils/logger");
+
 function runAutomationTriggers({ weather, user, location, activityDrop }) {
   const triggers = [];
 
@@ -44,5 +52,98 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   };
 }
 
-module.exports = { runAutomationTriggers };
+let triggerCronJob = null;
+
+function mockAqiFromWeather(weather) {
+  const rainMm = Number(weather?.rain?.["1h"] || weather?.rain?.["3h"] || 0) || 0;
+  const temp = Number(weather?.main?.temp || 0) || 0;
+  const clouds = Number(weather?.clouds?.all || 0) || 0;
+  const derived = 30 + rainMm * 0.6 + temp * 1.2 + clouds * 0.3;
+  return Math.max(10, Math.min(400, Math.round(derived)));
+}
+
+async function processHourlyParametricTriggers() {
+  const tempThreshold = Number(process.env.TRIGGER_TEMP_THRESHOLD || 40);
+  const aqiThreshold = Number(process.env.TRIGGER_AQI_THRESHOLD || 150);
+
+  const activePolicies = await Policy.find({ isActive: true }).select("userId").lean();
+  const userIds = Array.from(new Set(activePolicies.map((item) => String(item.userId)).filter(Boolean)));
+
+  for (const userId of userIds) {
+    try {
+      const [user, profile] = await Promise.all([
+        User.findById(userId).select("_id location").lean(),
+        PartnerProfile.findOne({ userId }).select("city rainThresholdMm").lean()
+      ]);
+
+      if (!user) continue;
+      const city = profile?.city || user.location;
+      if (!city) continue;
+
+      const weather = await fetchCurrentWeather(city);
+      const rainfall = Number(weather?.rain?.["1h"] || weather?.rain?.["3h"] || 0) || 0;
+      const temperature = Number(weather?.main?.temp || 0) || 0;
+      const aqi = mockAqiFromWeather(weather);
+      const rainThreshold = Number(profile?.rainThresholdMm || process.env.TRIGGER_RAIN_THRESHOLD || 15);
+
+      let triggerType = null;
+      if (rainfall > rainThreshold) triggerType = "weather";
+      else if (temperature > tempThreshold) triggerType = "time";
+      else if (aqi > aqiThreshold) triggerType = "event";
+
+      if (!triggerType) {
+        continue;
+      }
+
+      await createAutoTriggeredClaim(user, triggerType);
+
+      logger.info("Hourly trigger executed", {
+        userId,
+        city,
+        triggerType,
+        rainfall,
+        temperature,
+        aqi
+      });
+    } catch (error) {
+      logger.error("Hourly trigger processing failed", {
+        userId,
+        error: error.message
+      });
+    }
+  }
+}
+
+function startParametricTriggerEngine() {
+  if (triggerCronJob) {
+    return;
+  }
+
+  const enabled = String(process.env.PARAMETRIC_TRIGGER_ENGINE_ENABLED || "true").toLowerCase();
+  if (enabled === "false" || enabled === "0" || enabled === "off") {
+    logger.info("Parametric trigger engine disabled by environment");
+    return;
+  }
+
+  triggerCronJob = cron.schedule("0 * * * *", () => {
+    processHourlyParametricTriggers().catch((error) => {
+      logger.error("Parametric trigger engine run failed", { error: error.message });
+    });
+  });
+
+  logger.info("Parametric trigger engine started", { schedule: "0 * * * *" });
+}
+
+function stopParametricTriggerEngine() {
+  if (!triggerCronJob) return;
+  triggerCronJob.stop();
+  triggerCronJob = null;
+}
+
+module.exports = {
+  runAutomationTriggers,
+  processHourlyParametricTriggers,
+  startParametricTriggerEngine,
+  stopParametricTriggerEngine
+};
 

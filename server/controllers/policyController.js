@@ -5,6 +5,7 @@ const { calculatePremium } = require("../services/premiumService");
 const { runAutomationTriggers } = require("../services/triggerService");
 const { fetchCurrentWeather } = require("../services/openWeatherService");
 const { runAutomationForUser } = require("../services/automationService");
+const { calculatePremium: calculateWeeklyPremium } = require("../utils/premiumCalculator");
 
 function rainFromCurrent(data) {
   return Number(data?.rain?.["1h"] || data?.rain?.["3h"] || 0) || 0;
@@ -29,6 +30,7 @@ async function createPolicy(req, res, next) {
     const triggerResult = runAutomationTriggers({ weather, user, location: city });
     const premiumBase = calculatePremium(user, weather, { location: city });
     const dynamicPremium = Math.max(20, premiumBase.premium + triggerResult.premiumDelta);
+    const weeklyPremium = calculateWeeklyPremium(user?.risk_score ?? user?.riskScore ?? 0);
 
     const policy = await Policy.findOneAndUpdate(
       { userId },
@@ -36,6 +38,7 @@ async function createPolicy(req, res, next) {
         $set: {
           basePremium: premiumBase.basePremium,
           dynamicPremium,
+          weekly_premium: weeklyPremium,
           riskLevel: dynamicPremium >= 140 ? "high" : dynamicPremium >= 115 ? "medium" : "low",
           coverageHours: Number(coverageHours) || 24,
           location: city,
@@ -80,9 +83,11 @@ async function calculatePremiumEndpoint(req, res, next) {
     const triggerResult = runAutomationTriggers({ weather, user, location: city });
     const base = calculatePremium(user, weather, { location: city });
     const dynamicPremium = Math.max(20, base.premium + triggerResult.premiumDelta);
+    const weeklyPremium = calculateWeeklyPremium(user?.risk_score ?? user?.riskScore ?? 0);
 
     res.json({
       premium: dynamicPremium,
+      weeklyPremium,
       riskLevel: dynamicPremium >= 140 ? "high" : dynamicPremium >= 115 ? "medium" : "low",
       breakdown: base.breakdown,
       weather,

@@ -21,6 +21,7 @@ const premiumRoutes = require("./routes/premiumRoutes");
 const triggerRoutes = require("./routes/triggerRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const { startClaimAutomationScheduler } = require("./services/claimAutomationScheduler");
+const { startParametricTriggerEngine } = require("./services/triggerService");
 
 const app = express();
 
@@ -56,6 +57,7 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startClaimAutomationScheduler();
+    startParametricTriggerEngine();
   });
 }
 

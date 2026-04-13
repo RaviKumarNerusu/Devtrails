@@ -1,3 +1,6 @@
+const User = require("../models/User");
+const Claim = require("../models/Claim");
+
 function normalizeNonNegativeNumber(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return 0;
@@ -29,8 +32,32 @@ function calculatePayout(rainMm, thresholdMm, avgDailyEarning) {
   return earning;
 }
 
+async function simulateClaimPayout({ claimId, userId, payoutAmount, session = null }) {
+  const amount = normalizeNonNegativeNumber(payoutAmount);
+  if (!userId || amount <= 0) {
+    return { paid: false, amount: 0, wallet_balance: 0 };
+  }
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $inc: { wallet_balance: amount } },
+    { new: true, session }
+  );
+
+  if (claimId) {
+    await Claim.findByIdAndUpdate(claimId, { $set: { paidAt: new Date() } }, { session });
+  }
+
+  return {
+    paid: true,
+    amount,
+    wallet_balance: Number(user?.wallet_balance || 0)
+  };
+}
+
 module.exports = {
   calculateRisk,
-  calculatePayout
+  calculatePayout,
+  simulateClaimPayout
 };
 
