@@ -8,6 +8,11 @@ async function getDashboardSummary(req, res, next) {
     const activePolicy = await Policy.findOne({ userId, isActive: true }).sort({ createdAt: -1 }).lean();
 
     const todayComp = await buildTodayCompensation(req.user);
+    const userPayload = {
+      id: userId,
+      wallet_balance: Number(req.user?.wallet_balance || 0),
+      risk_score: Number(req.user?.risk_score ?? req.user?.riskScore ?? 0)
+    };
 
     if (!activePolicy) {
       return res.json({
@@ -19,7 +24,8 @@ async function getDashboardSummary(req, res, next) {
         todayComp,
         claim: null,
         claimSummary: { total: 0, paid: 0 },
-        recentClaims: []
+        recentClaims: [],
+        user: userPayload
       });
     }
 
@@ -35,6 +41,7 @@ async function getDashboardSummary(req, res, next) {
       claim: claimResult?.claim || claims[0] || null,
       eligible: Boolean(claimResult?.eligible),
       status: claimResult?.status || null,
+      user: userPayload,
       claimSummary: {
         total: claims.length,
         paid: approvedCount

@@ -1,5 +1,16 @@
 import { api } from "./apiClient.js";
 
+function normalizeClaim(claim = {}) {
+  return {
+    ...claim,
+    risk_score: Number(claim?.risk_score ?? claim?.riskScore ?? 0),
+    fraud_score: Number(claim?.fraud_score ?? claim?.fraudScore ?? 0),
+    trigger_type: claim?.trigger_type || claim?.triggerType || "weather",
+    payout_amount: Number(claim?.payout_amount ?? claim?.payoutAmount ?? claim?.amount ?? 0),
+    wallet_balance: Number(claim?.wallet_balance ?? claim?.walletBalance ?? 0)
+  };
+}
+
 function authHeaders() {
   const token = localStorage.getItem("auth_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -7,17 +18,27 @@ function authHeaders() {
 
 export async function autoCreateClaim() {
   const { data } = await api.post("/claim/auto", {}, { headers: authHeaders() });
-  return data;
+  console.log("API response:", data);
+  return {
+    ...data,
+    claim: data?.claim ? normalizeClaim(data.claim) : null
+  };
 }
 
 export async function getMyClaims() {
   const { data } = await api.get("/claim/my", { headers: authHeaders() });
-  return Array.isArray(data?.claims) ? data.claims : [];
+  const claims = Array.isArray(data?.claims) ? data.claims.map(normalizeClaim) : [];
+  console.log("API response:", claims);
+  return claims;
 }
 
 export async function redeemClaimNow(claimId = null) {
   const payload = claimId ? { claimId } : {};
   const { data } = await api.post("/claim/redeem", payload, { headers: authHeaders() });
-  return data;
+  console.log("API response:", data);
+  return {
+    ...data,
+    claim: data?.claim ? normalizeClaim(data.claim) : null
+  };
 }
 

@@ -58,6 +58,8 @@ export default function DashboardPage() {
   const [claimError, setClaimError] = useState("");
   const [profileSaveMessage, setProfileSaveMessage] = useState("");
   const [profileSaveError, setProfileSaveError] = useState("");
+  const hasRiskScore = policyInfo?.riskScore !== null && policyInfo?.riskScore !== undefined;
+  const hasWeeklyPremium = policyInfo?.weeklyPremium !== null && policyInfo?.weeklyPremium !== undefined;
 
   const loadHistory = async () => {
     try {
@@ -141,6 +143,8 @@ export default function DashboardPage() {
       if (summary.hasPolicy) {
         setPolicyInfo({
           dynamicPremium: summary?.policy?.dynamicPremium ?? 100,
+          weeklyPremium: summary?.policy?.weekly_premium ?? summary?.policy?.weeklyPremium ?? 0,
+          riskScore: summary?.user?.risk_score ?? summary?.claim?.risk_score ?? 0,
           riskLevel: summary?.policy?.riskLevel ?? "low",
           isActive: true
         });
@@ -148,7 +152,7 @@ export default function DashboardPage() {
         setClaimSummary(summary.claimSummary || { total: 0, paid: 0 });
         setRecentClaims(Array.isArray(summary.recentClaims) ? summary.recentClaims : []);
       } else {
-        setPolicyInfo({ dynamicPremium: 0, riskLevel: "low", isActive: false });
+        setPolicyInfo({ dynamicPremium: 0, weeklyPremium: null, riskScore: null, riskLevel: "low", isActive: false });
         setTodayClaim(null);
         setClaimSummary({ total: 0, paid: 0 });
         setRecentClaims([]);
@@ -262,6 +266,14 @@ export default function DashboardPage() {
               <div className="me-3">
                 <div className="small text-muted">Current premium</div>
                 <div className="h5 mb-0">₹{Number(policyInfo.dynamicPremium || 0).toFixed(0)}</div>
+              </div>
+              <div className="me-3">
+                <div className="small text-muted">Risk Score</div>
+                <div className="h5 mb-0">{hasRiskScore ? Number(policyInfo.riskScore).toFixed(2) : "Calculating..."}</div>
+              </div>
+              <div className="me-3">
+                <div className="small text-muted">Weekly Premium</div>
+                <div className="h5 mb-0">{hasWeeklyPremium ? `₹${Number(policyInfo.weeklyPremium).toFixed(0)}` : "Calculating..."}</div>
               </div>
               <div className="me-3">
                 <div className="small text-muted">Risk level</div>

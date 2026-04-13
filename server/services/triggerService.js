@@ -81,6 +81,10 @@ async function processHourlyParametricTriggers() {
       if (!city) continue;
 
       const weather = await fetchCurrentWeather(city);
+      if (!weather) {
+        logger.warn("Trigger engine skipped due to missing weather data", { userId, city });
+        continue;
+      }
       const rainfall = Number(weather?.rain?.["1h"] || weather?.rain?.["3h"] || 0) || 0;
       const temperature = Number(weather?.main?.temp || 0) || 0;
       const aqi = mockAqiFromWeather(weather);
@@ -92,6 +96,13 @@ async function processHourlyParametricTriggers() {
       else if (aqi > aqiThreshold) triggerType = "event";
 
       if (!triggerType) {
+        logger.debug("Trigger engine evaluated with no action", {
+          userId,
+          city,
+          rainfall,
+          temperature,
+          aqi
+        });
         continue;
       }
 

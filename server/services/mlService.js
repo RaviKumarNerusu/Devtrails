@@ -24,10 +24,14 @@ async function getRiskScore(data) {
       timeout: Number(process.env.ML_SERVICE_TIMEOUT_MS || 3000)
     });
 
-    return normalizeRiskScore(response?.data?.risk_score);
+    const riskScore = normalizeRiskScore(response?.data?.risk_score);
+    console.log("Risk Score:", riskScore);
+    return riskScore;
   } catch (error) {
     // Keep existing claim flow resilient even if ML service is temporarily unavailable.
-    return 0;
+    const fallbackRiskScore = 0.5;
+    console.log("Risk Score:", fallbackRiskScore, "(fallback)");
+    return fallbackRiskScore;
   }
 }
 

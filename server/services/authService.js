@@ -11,7 +11,14 @@ function signToken(userId) {
 }
 
 function sanitizeUser(user) {
-  return { id: user._id, name: user.name, email: user.email, role: user.role || "partner" };
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role || "partner",
+    wallet_balance: Number(user?.wallet_balance || 0),
+    risk_score: Number(user?.risk_score ?? user?.riskScore ?? 0)
+  };
 }
 
 async function registerUser({ name, email, password, city, pincode, rainThresholdMm }) {

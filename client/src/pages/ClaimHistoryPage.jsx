@@ -125,7 +125,10 @@ export default function ClaimHistoryPage() {
                   <td>{p.city || "-"}</td>
                   <td>{Number(p.rainMm || 0).toFixed(1)}</td>
                   <td>{Number(p.threshold || 0).toFixed(1)}</td>
-                  <td>₹{Number(p.payoutAmount || p.amount || 0).toFixed(0)}</td>
+                  <td>
+                    ₹{Number(p.payout_amount || p.payoutAmount || p.amount || 0).toFixed(0)}
+                    <div className="small text-muted">Risk: {p?.risk_score ?? p?.riskScore ?? "N/A"} · Fraud: {p?.fraud_score ?? p?.fraudScore ?? "N/A"}</div>
+                  </td>
                   <td>
                     <span className={`badge text-capitalize ${statusBadgeClass(p.status)}`}>
                       {statusLabel(p.status)}

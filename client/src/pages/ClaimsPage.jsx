@@ -167,6 +167,12 @@ export default function ClaimsPage() {
                     Rain: {Number(c.rainMm || 0).toFixed(1)} mm · Risk: {c.riskLevel || "-"} · Amount: ₹
                     {Number((c.amount ?? c.payoutAmount) || 0).toFixed(0)}
                   </div>
+                  <div className="small text-muted mb-2">
+                    Risk Score: {c?.risk_score ?? c?.riskScore ?? "N/A"} · Fraud Score: {c?.fraud_score ?? c?.fraudScore ?? "N/A"}
+                  </div>
+                  <div className="small text-muted mb-2">
+                    Status: {c?.status || "N/A"} · Payout: ₹{Number(c?.payout_amount ?? c?.payoutAmount ?? 0).toFixed(0)}
+                  </div>
                   <div className="small text-muted mb-2">Trigger: {(c.triggerType || "weather").toUpperCase()}</div>
                   <ClaimTimeline claim={c} />
                 </div>

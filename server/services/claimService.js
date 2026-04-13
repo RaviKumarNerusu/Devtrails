@@ -222,10 +222,20 @@ async function evaluateClaimEligibility(user) {
   });
   const weeklyPremium = calculatePremium(riskScore);
 
+  console.log("Fraud Score:", fraudResult.fraud_score);
+  console.log("Premium:", weeklyPremium);
+
   await Promise.all([
     User.findByIdAndUpdate(user._id, { $set: { riskScore: riskScore, risk_score: riskScore } }),
     Policy.updateOne({ userId: user._id, isActive: true }, { $set: { weekly_premium: weeklyPremium } })
   ]);
+
+  logger.info("ML integration completed", {
+    userId: user._id.toString(),
+    riskScore,
+    fraudScore: fraudResult.fraud_score,
+    weeklyPremium
+  });
 
   const forceStatus = fraudResult.should_reject ? "rejected" : null;
   const claim = await upsertDailyClaimRecord({
@@ -243,6 +253,13 @@ async function evaluateClaimEligibility(user) {
     riskScore,
     fraudScore: fraudResult.fraud_score,
     forceStatus
+  });
+
+  logger.info("Fraud detection evaluated", {
+    userId: user._id.toString(),
+    fraudScore: fraudResult.fraud_score,
+    shouldReject: fraudResult.should_reject,
+    reasons: fraudResult.reasons
   });
 
   logger.info("Claim eligibility evaluated", {
@@ -405,6 +422,15 @@ async function createAutoTriggeredClaim(user, triggerType = "weather") {
       { new: true }
     );
   }
+
+  logger.info("Auto claim processed", {
+    userId: user._id.toString(),
+    triggerType,
+    claimStatus: result.claim.status,
+    payoutAmount: result.claim.payoutAmount,
+    riskScore: result.claim.risk_score,
+    fraudScore: result.claim.fraud_score
+  });
 
   return result;
 }
