@@ -22,12 +22,21 @@ async function getFraudScore({ userId, rainMm = 0, threshold = 0, triggeredByWea
     Claim.countDocuments({ userId, createdAt: { $gte: last7Days } })
   ]);
 
+  const recentClaims = await Claim.find({ userId, createdAt: { $gte: last7Days } })
+    .select("city rainMm threshold status date")
+    .lean();
+
   let score = 0;
   const reasons = [];
 
   if (claims24h >= 2) {
     score += 0.35 + Math.min(0.2, (claims24h - 2) * 0.1);
     reasons.push("multiple_claims_within_24h");
+  }
+
+  if (claims24h >= 3) {
+    score += 0.1;
+    reasons.push("duplicate_claim_attempt_pattern");
   }
 
   const weatherValid = triggeredByWeather && Number(rainMm) >= Number(threshold);
@@ -39,6 +48,30 @@ async function getFraudScore({ userId, rainMm = 0, threshold = 0, triggeredByWea
   if (claims7d >= 5) {
     score += 0.3;
     reasons.push("too_frequent_claims");
+  }
+
+  // GPS spoofing proxy: abrupt city volatility in short windows.
+  const uniqueCities = new Set(
+    recentClaims
+      .map((item) => String(item.city || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (uniqueCities.size >= 3) {
+    score += 0.2;
+    reasons.push("gps_spoofing_suspected_city_volatility");
+  }
+
+  // Historical anomaly proxy: repeated eligible/approved claims with rain below threshold.
+  const fakeWeatherLikeClaims = recentClaims.filter((item) => {
+    const status = String(item.status || "").toLowerCase();
+    return (
+      (status === "eligible" || status === "approved" || status === "claimed") &&
+      Number(item.rainMm || 0) < Number(item.threshold || 0)
+    );
+  });
+  if (fakeWeatherLikeClaims.length >= 2) {
+    score += 0.25;
+    reasons.push("historical_fake_weather_claim_pattern");
   }
 
   if (isAutoTriggered && claims24h >= 3) {

@@ -33,3 +33,9 @@ export async function getDashboardSummary() {
   console.log("API response:", summary);
   return summary;
 }
+
+export async function getInsurerAnalytics() {
+  const { data } = await api.get("/dashboard/insurer-analytics");
+  console.log("API response:", data);
+  return data || null;
+}

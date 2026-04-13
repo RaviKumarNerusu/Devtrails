@@ -1,5 +1,7 @@
 const User = require("../models/User");
 const Claim = require("../models/Claim");
+const { simulateInstantPayout } = require("./gatewayService");
+const logger = require("../utils/logger");
 
 function normalizeNonNegativeNumber(value) {
   const n = Number(value);
@@ -38,6 +40,15 @@ async function simulateClaimPayout({ claimId, userId, payoutAmount, session = nu
     return { paid: false, amount: 0, wallet_balance: 0 };
   }
 
+  const gatewayResult = await simulateInstantPayout({
+    amount,
+    gateway: process.env.SIMULATED_PAYOUT_GATEWAY || "razorpay-sandbox"
+  });
+
+  if (gatewayResult.status !== "success") {
+    return { paid: false, amount: 0, wallet_balance: 0, gateway: gatewayResult };
+  }
+
   const user = await User.findByIdAndUpdate(
     userId,
     { $inc: { wallet_balance: amount } },
@@ -45,13 +56,36 @@ async function simulateClaimPayout({ claimId, userId, payoutAmount, session = nu
   );
 
   if (claimId) {
-    await Claim.findByIdAndUpdate(claimId, { $set: { paidAt: new Date() } }, { session });
+    await Claim.findByIdAndUpdate(
+      claimId,
+      {
+        $set: { paidAt: new Date() },
+        $push: {
+          auditLogs: {
+            action: "INSTANT_PAYOUT_SIMULATED",
+            timestamp: new Date(),
+            details: gatewayResult
+          }
+        }
+      },
+      { session }
+    );
   }
+
+  logger.info("Instant payout simulated", {
+    userId: userId?.toString(),
+    claimId: claimId?.toString?.() || claimId,
+    amount,
+    gateway: gatewayResult.gateway,
+    transactionId: gatewayResult.transactionId,
+    latencyMs: gatewayResult.latencyMs
+  });
 
   return {
     paid: true,
     amount,
-    wallet_balance: Number(user?.wallet_balance || 0)
+    wallet_balance: Number(user?.wallet_balance || 0),
+    gateway: gatewayResult
   };
 }
 

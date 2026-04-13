@@ -10,6 +10,20 @@ const { getLocalDateOnly } = require("../utils/claimValidator");
 const logger = require("../utils/logger");
 const { Types } = require("mongoose");
 
+function normalizeClaimPayload(claim) {
+  if (!claim) return claim;
+  const claimObj = typeof claim?.toObject === "function" ? claim.toObject({ depopulate: true }) : claim;
+  const payout = Number(claimObj?.payoutAmount ?? claimObj?.amount ?? 0);
+  return {
+    ...claimObj,
+    risk_score: Number(claimObj?.risk_score ?? 0),
+    fraud_score: Number(claimObj?.fraud_score ?? 0),
+    trigger_type: claimObj?.trigger_type || claimObj?.triggerType || "weather",
+    payout_amount: payout,
+    status: claimObj?.status || "not_eligible"
+  };
+}
+
 /**
  * Trigger automatic claim processing
  * POST /api/claim/auto
@@ -45,7 +59,7 @@ async function autoClaim(req, res, next) {
 
     return res.status(201).json({
       success: true,
-      claim: result.claim,
+      claim: normalizeClaimPayload(result.claim),
       eligible: result.eligible,
       status: result.status,
       data: {
@@ -54,7 +68,7 @@ async function autoClaim(req, res, next) {
         threshold: result.threshold,
         eligible: result.eligible,
         status: result.status,
-        claim: result.claim
+        claim: normalizeClaimPayload(result.claim)
       },
       message: result.eligible ? "Claim record updated as eligible." : "Claim record updated as not eligible."
     });
@@ -87,10 +101,12 @@ async function listMyClaims(req, res, next) {
       count: claims.length
     });
 
+    const normalizedClaims = claims.map(normalizeClaimPayload);
+
     return res.json({
       success: true,
-      claims,
-      data: { claims },
+      claims: normalizedClaims,
+      data: { claims: normalizedClaims },
       message: "Claims retrieved successfully"
     });
   } catch (err) {
@@ -123,10 +139,10 @@ async function redeemClaim(req, res, next) {
     const claim = await redeemEligibleClaim(req.user, claimId);
     return res.json({
       success: true,
-      claim,
+      claim: normalizeClaimPayload(claim),
       eligible: isClaimEligibleStatus(claim.status),
       status: claim.status,
-      data: { claim },
+      data: { claim: normalizeClaimPayload(claim) },
       message: "Claim redeemed and approved successfully"
     });
   } catch (err) {
@@ -171,10 +187,10 @@ async function getClaimDetails(req, res, next) {
 
     return res.json({
       success: true,
-      claim,
+      claim: normalizeClaimPayload(claim),
       eligible: isClaimEligibleStatus(claim.status),
       status: claim.status,
-      data: claim,
+      data: normalizeClaimPayload(claim),
       message: "Claim details retrieved successfully"
     });
   } catch (err) {
@@ -211,12 +227,16 @@ async function listAllClaims(req, res, next) {
     }
 
     const result = await listClaimsForInsurer({ page, limit, userId, status, from, to });
+    const normalizedClaims = result.claims.map(normalizeClaimPayload);
 
     return res.json({
       success: true,
-      claims: result.claims,
+      claims: normalizedClaims,
       pagination: result.pagination,
-      data: result,
+      data: {
+        ...result,
+        claims: normalizedClaims
+      },
       message: "Full claim history retrieved successfully"
     });
   } catch (err) {
