@@ -3,6 +3,7 @@ import joblib
 import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel
+from train_model import train_and_save_model
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "model.pkl")
 app = FastAPI(title="Risk ML Service", version="1.0.0")
@@ -18,7 +19,7 @@ class PredictRequest(BaseModel):
 
 def _load_model():
     if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError("model.pkl was not found. Run train_model.py first.")
+        train_and_save_model()
     return joblib.load(MODEL_PATH)
 
 
