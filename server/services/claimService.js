@@ -104,8 +104,13 @@ async function upsertDailyClaimRecord({
   forceStatus = null
 }) {
   const claimDate = getLocalDateOnly();
-  const nextStatus = forceStatus || (eligible ? "eligible" : "not_eligible");
+  let nextStatus = forceStatus || (eligible ? "eligible" : "not_eligible");
   const existingClaim = await Claim.findOne({ userId, date: claimDate });
+
+  // Preserve eligibility once reached for the day unless an explicit forceStatus is provided.
+  if (!forceStatus && existingClaim && normalizeStatus(existingClaim.status) === "eligible" && nextStatus === "not_eligible") {
+    nextStatus = "eligible";
+  }
 
   if (existingClaim && TERMINAL_STATUSES.has(normalizeStatus(existingClaim.status))) {
     return existingClaim;
