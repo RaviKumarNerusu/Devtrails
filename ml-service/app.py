@@ -1,18 +1,19 @@
 import os
 import joblib
 import numpy as np
-from flask import Flask, request, jsonify
+from fastapi import FastAPI
+from pydantic import BaseModel
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "model.pkl")
+app = FastAPI(title="Risk ML Service", version="1.0.0")
 
-app = Flask(__name__)
 
-
-def _coerce_float(payload: dict, key: str, default: float = 0.0) -> float:
-    try:
-        return float(payload.get(key, default))
-    except (TypeError, ValueError):
-        return default
+class PredictRequest(BaseModel):
+    temperature: float = 0.0
+    rainfall: float = 0.0
+    aqi: float = 0.0
+    past_claims: float = 0.0
+    location_risk: float = 0.0
 
 
 def _load_model():
@@ -26,21 +27,20 @@ model = _load_model()
 
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "service": "risk-ml-service"})
+    return {"ok": True, "service": "risk-ml-service"}
 
 
 @app.post("/predict")
-def predict():
-    payload = request.get_json(silent=True) or {}
+def predict(payload: PredictRequest):
 
     features = np.array(
         [
             [
-                _coerce_float(payload, "temperature"),
-                _coerce_float(payload, "rainfall"),
-                _coerce_float(payload, "aqi"),
-                _coerce_float(payload, "past_claims"),
-                _coerce_float(payload, "location_risk"),
+                float(payload.temperature),
+                float(payload.rainfall),
+                float(payload.aqi),
+                float(payload.past_claims),
+                float(payload.location_risk),
             ]
         ]
     )
@@ -48,8 +48,10 @@ def predict():
     prediction = float(model.predict(features)[0])
     risk_score = float(np.clip(prediction, 0.0, 1.0))
 
-    return jsonify({"risk_score": risk_score})
+    return {"risk_score": risk_score}
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("ML_SERVICE_PORT", "5001")))
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("ML_SERVICE_PORT", "5001")))

@@ -57,6 +57,9 @@ When user has no active policy:
   - `AUTO_CLAIM_SCAN_INTERVAL_MS=1800000`
   - `AUTO_CLAIM_SCHEDULER_STARTUP_DELAY_MS=5000`
   - `AUTO_CLAIM_SCHEDULER_BATCH_SIZE=25`
+4. Optional AI/ML add-on vars:
+  - `ML_SERVICE_URL=http://127.0.0.1:5001/predict`
+  - `ML_SERVICE_TIMEOUT_MS=3000`
 
 Run backend:
 
@@ -64,6 +67,34 @@ Run backend:
 cd server
 npm install
 npm run dev
+```
+
+## AI/ML Microservice (FastAPI)
+
+The AI risk model is a separate Python service in [ml-service](ml-service) and does not replace existing backend logic.
+
+### Recommended (Most Reliable) Run Path: Docker
+
+```bash
+cd ml-service
+docker build -t devtrails-ml .
+docker run --rm -p 5001:5001 devtrails-ml
+```
+
+This build step trains the RandomForestRegressor model and starts a FastAPI server:
+
+- `GET /health`
+- `POST /predict` -> `{ "risk_score": 0..1 }`
+
+### Local Python Run (If Interpreter Is Healthy)
+
+```bash
+cd ml-service
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python train_model.py
+uvicorn app:app --host 0.0.0.0 --port 5001
 ```
 
 ## Frontend Setup
