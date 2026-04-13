@@ -9,15 +9,7 @@ function normalizeRisk(value) {
 function calculatePremium(risk_score) {
   const base_price = 100;
   const risk = normalizeRisk(risk_score);
-
-  let premium = base_price * (1 + risk);
-
-  if (risk < 0.3) {
-    premium *= 0.9;
-  } else if (risk > 0.7) {
-    premium *= 1.2;
-  }
-
+  const premium = base_price * (1 + risk);
   return Number(premium.toFixed(2));
 }
 

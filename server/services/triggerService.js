@@ -1,8 +1,9 @@
 const cron = require("node-cron");
 const Policy = require("../models/Policy");
 const User = require("../models/User");
+const Claim = require("../models/Claim");
 const PartnerProfile = require("../models/PartnerProfile");
-const { fetchCurrentWeather } = require("./openWeatherService");
+const { fetchCurrentWeather, fetchFiveDayForecast } = require("./openWeatherService");
 const { createAutoTriggeredClaim } = require("./claimService");
 const logger = require("../utils/logger");
 
@@ -62,8 +63,63 @@ function mockAqiFromWeather(weather) {
   return Math.max(10, Math.min(400, Math.round(derived)));
 }
 
+function mean(values) {
+  const nums = values.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+  if (nums.length === 0) return 0;
+  return nums.reduce((sum, n) => sum + n, 0) / nums.length;
+}
+
+function stdDev(values, avg) {
+  const nums = values.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+  if (nums.length === 0) return 0;
+  const variance = nums.reduce((sum, n) => sum + ((n - avg) ** 2), 0) / nums.length;
+  return Math.sqrt(variance);
+}
+
+async function computeDynamicThresholds({ userId, city, fallbackRainThreshold = 15 }) {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [recentClaims, forecast] = await Promise.all([
+    Claim.find({ userId, createdAt: { $gte: since } })
+      .select("rainMm")
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean(),
+    fetchFiveDayForecast(city).catch(() => null)
+  ]);
+
+  const rainHistory = recentClaims.map((item) => Number(item?.rainMm || 0));
+  const tempHistory = Array.isArray(forecast?.list)
+    ? forecast.list
+      .map((item) => Number(item?.main?.temp))
+      .filter((v) => Number.isFinite(v))
+      .slice(0, 30)
+    : [];
+
+  const rainMean = mean(rainHistory);
+  const rainStd = stdDev(rainHistory, rainMean);
+  const tempMean = mean(tempHistory);
+  const tempStd = stdDev(tempHistory, tempMean);
+
+  const rainfallThreshold = Math.max(1, Number((rainHistory.length > 0 ? (rainMean + rainStd) : fallbackRainThreshold).toFixed(2)));
+  const temperatureThreshold = Number((tempHistory.length > 0 ? (tempMean + tempStd) : Number(process.env.TRIGGER_TEMP_THRESHOLD || 40)).toFixed(2));
+
+  return {
+    rainfallThreshold,
+    temperatureThreshold,
+    details: {
+      rain_mean: Number(rainMean.toFixed(2)),
+      rain_std: Number(rainStd.toFixed(2)),
+      temp_mean: Number(tempMean.toFixed(2)),
+      temp_std: Number(tempStd.toFixed(2)),
+      history_points: {
+        rainfall: rainHistory.length,
+        temperature: tempHistory.length
+      }
+    }
+  };
+}
+
 async function processHourlyParametricTriggers() {
-  const tempThreshold = Number(process.env.TRIGGER_TEMP_THRESHOLD || 40);
   const aqiThreshold = Number(process.env.TRIGGER_AQI_THRESHOLD || 150);
 
   const activePolicies = await Policy.find({ isActive: true }).select("userId").lean();
@@ -72,7 +128,7 @@ async function processHourlyParametricTriggers() {
   for (const userId of userIds) {
     try {
       const [user, profile] = await Promise.all([
-        User.findById(userId).select("_id location").lean(),
+        User.findById(userId).select("_id location risk_score riskScore").lean(),
         PartnerProfile.findOne({ userId }).select("city rainThresholdMm").lean()
       ]);
 
@@ -88,7 +144,19 @@ async function processHourlyParametricTriggers() {
       const rainfall = Number(weather?.rain?.["1h"] || weather?.rain?.["3h"] || 0) || 0;
       const temperature = Number(weather?.main?.temp || 0) || 0;
       const aqi = mockAqiFromWeather(weather);
-      const rainThreshold = Number(profile?.rainThresholdMm || process.env.TRIGGER_RAIN_THRESHOLD || 15);
+
+      const dynamicThresholds = await computeDynamicThresholds({
+        userId,
+        city,
+        fallbackRainThreshold: Number(profile?.rainThresholdMm || process.env.TRIGGER_RAIN_THRESHOLD || 15)
+      });
+
+      const userRisk = Number(user?.risk_score ?? user?.riskScore ?? 0);
+      const riskMultiplier = userRisk > 0.7 ? 0.9 : 1;
+      const rainThreshold = Number((dynamicThresholds.rainfallThreshold * riskMultiplier).toFixed(2));
+      const tempThreshold = Number((dynamicThresholds.temperatureThreshold * riskMultiplier).toFixed(2));
+
+      console.log("Threshold:", rainThreshold);
 
       let triggerType = null;
       if (rainfall > rainThreshold) triggerType = "weather";
@@ -106,7 +174,16 @@ async function processHourlyParametricTriggers() {
         continue;
       }
 
-      await createAutoTriggeredClaim(user, triggerType);
+      await createAutoTriggeredClaim(user, triggerType, {
+        dynamicThreshold: rainThreshold,
+        thresholdUsed: {
+          rainfall_threshold: rainThreshold,
+          temperature_threshold: tempThreshold,
+          aqi_threshold: aqiThreshold,
+          risk_multiplier: riskMultiplier,
+          dynamic_details: dynamicThresholds.details
+        }
+      });
 
       logger.info("Hourly trigger executed", {
         userId,

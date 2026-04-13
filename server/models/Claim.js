@@ -27,6 +27,11 @@ const claimSchema = new mongoose.Schema(
     trigger_type: { type: String, default: "weather" },
     risk_score: { type: Number, default: 0, min: 0, max: 1 },
     fraud_score: { type: Number, default: 0, min: 0, max: 1 },
+    ml_factors: { type: mongoose.Schema.Types.Mixed, default: {} },
+    model_version: { type: String, default: "v1.0" },
+    threshold_used: { type: mongoose.Schema.Types.Mixed, default: null },
+    confidence_score: { type: Number, default: 0, min: 0, max: 1 },
+    decision_reason: { type: String, trim: true, default: "" },
     status: {
       type: String,
       enum: ["not_eligible", "eligible", "claimed", "approved", "rejected"],

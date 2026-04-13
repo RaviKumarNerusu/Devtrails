@@ -7,6 +7,7 @@ const { getRiskScore } = require("./mlService");
 const { getFraudScore } = require("./fraudService");
 const { calculatePremium } = require("../utils/premiumCalculator");
 const { simulateClaimPayout } = require("./payoutService");
+const { logAudit } = require("./auditLogService");
 const {
   extractRainSafely,
   getLocalDateOnly,
@@ -42,6 +43,52 @@ function inferLocationRisk(city) {
   const value = String(city || "").toLowerCase();
   const highRisk = ["industrial", "flood", "coastal", "lowland", "high-risk", "high_risk_area", "flood_zone"];
   return highRisk.some((item) => value.includes(item)) ? 0.8 : 0.2;
+}
+
+function clamp01(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  if (n <= 0) return 0;
+  if (n >= 1) return 1;
+  return n;
+}
+
+function deriveConfidenceDecision(riskScore, fraudScore, eligible) {
+  const confidenceScore = clamp01(Number(riskScore) * (1 - clamp01(Number(fraudScore))));
+
+  if (!eligible) {
+    return {
+      confidence_score: confidenceScore,
+      forceStatus: "not_eligible",
+      requiresAdminReview: false,
+      decision_reason: "threshold_not_met"
+    };
+  }
+
+  if (confidenceScore > 0.6) {
+    return {
+      confidence_score: confidenceScore,
+      forceStatus: "eligible",
+      requiresAdminReview: false,
+      decision_reason: "auto_approve_high_confidence"
+    };
+  }
+
+  if (confidenceScore >= 0.3) {
+    return {
+      confidence_score: confidenceScore,
+      forceStatus: "eligible",
+      requiresAdminReview: true,
+      decision_reason: "manual_review_required_medium_confidence"
+    };
+  }
+
+  return {
+    confidence_score: confidenceScore,
+    forceStatus: "rejected",
+    requiresAdminReview: false,
+    decision_reason: "auto_reject_low_confidence"
+  };
 }
 
 async function collapseDuplicateDailyClaims(userId, claimDate) {
@@ -101,6 +148,12 @@ async function upsertDailyClaimRecord({
   triggerType = "weather",
   riskScore = 0,
   fraudScore = 0,
+  mlFactors = {},
+  modelVersion = "v1.0",
+  thresholdUsed = null,
+  confidenceScore = 0,
+  decisionReason = "",
+  requiresAdminReview = false,
   forceStatus = null
 }) {
   const claimDate = getLocalDateOnly();
@@ -137,6 +190,13 @@ async function upsertDailyClaimRecord({
     trigger_type: triggerType,
     risk_score: Number.isFinite(Number(riskScore)) ? Number(riskScore) : 0,
     fraud_score: Number.isFinite(Number(fraudScore)) ? Number(fraudScore) : 0,
+    ml_factors: mlFactors && typeof mlFactors === "object" ? mlFactors : {},
+    model_version: String(modelVersion || "v1.0"),
+    threshold_used: thresholdUsed,
+    confidence_score: Number.isFinite(Number(confidenceScore)) ? clamp01(confidenceScore) : 0,
+    decision_reason: String(decisionReason || ""),
+    requiresAdminReview: Boolean(requiresAdminReview),
+    adminReviewReason: requiresAdminReview ? String(decisionReason || "manual_review_required") : "",
     status: nextStatus
   };
 
@@ -157,6 +217,13 @@ async function upsertDailyClaimRecord({
         trigger_type: triggerType,
         risk_score: Number.isFinite(Number(riskScore)) ? Number(riskScore) : 0,
         fraud_score: Number.isFinite(Number(fraudScore)) ? Number(fraudScore) : 0,
+        ml_factors: mlFactors && typeof mlFactors === "object" ? mlFactors : {},
+        model_version: String(modelVersion || "v1.0"),
+        threshold_used: thresholdUsed,
+        confidence_score: Number.isFinite(Number(confidenceScore)) ? clamp01(confidenceScore) : 0,
+        decision_reason: String(decisionReason || ""),
+        requiresAdminReview: Boolean(requiresAdminReview),
+        adminReviewReason: requiresAdminReview ? String(decisionReason || "manual_review_required") : "",
         status: nextStatus,
         auditLogs: [auditEntry]
       });
@@ -192,12 +259,13 @@ async function upsertDailyClaimRecord({
   }
 }
 
-async function evaluateClaimEligibility(user) {
+async function evaluateClaimEligibility(user, options = {}) {
   const profile = await PartnerProfile.findOne({ userId: user._id }).lean();
   const city = validateUserProfile(user, profile);
   const policy = await getActivePolicyOrThrow(user._id, profile);
 
-  const threshold = Number(profile?.rainThresholdMm || 15);
+  const profileThreshold = Number(profile?.rainThresholdMm || 15);
+  const threshold = Number(options?.dynamicThreshold ?? profileThreshold);
 
   const currentWeather = await fetchCurrentWeather(city);
   const rainMm = extractRainSafely(currentWeather, 1);
@@ -212,17 +280,29 @@ async function evaluateClaimEligibility(user) {
     past_claims: pastClaims,
     location_risk: inferLocationRisk(city)
   };
-  const riskScore = await getRiskScore(mlInput);
+  const mlResult = await getRiskScore({ ...mlInput, userId: user._id });
+  const riskScore = clamp01(mlResult?.risk_score);
+  const mlFactors = mlResult?.factors && typeof mlResult.factors === "object" ? mlResult.factors : {};
+  const modelVersion = String(mlResult?.model_version || "v1.0");
+
+  const locationMismatch = Boolean(profile?.city && user?.location && String(profile.city).trim().toLowerCase() !== String(user.location).trim().toLowerCase());
   const fraudResult = await getFraudScore({
     userId: user._id,
     rainMm,
     threshold,
     triggeredByWeather: eligible,
-    isAutoTriggered: true
+    isAutoTriggered: true,
+    triggerType: options?.triggerType || "weather",
+    riskScore,
+    locationMismatch
   });
+
+  const confidence = deriveConfidenceDecision(riskScore, fraudResult.fraud_score, eligible);
   const weeklyPremium = calculatePremium(riskScore);
 
   console.log("Fraud Score:", fraudResult.fraud_score);
+  console.log("Confidence:", confidence.confidence_score);
+  console.log("Threshold:", threshold);
   console.log("Premium:", weeklyPremium);
 
   await Promise.all([
@@ -237,7 +317,6 @@ async function evaluateClaimEligibility(user) {
     weeklyPremium
   });
 
-  const forceStatus = fraudResult.should_reject ? "rejected" : null;
   const claim = await upsertDailyClaimRecord({
     userId: user._id,
     city,
@@ -249,10 +328,29 @@ async function evaluateClaimEligibility(user) {
     payoutAmount: 0,
     maxPayoutAmount: 0,
     autoTriggered: true,
-    triggerType: "weather",
+    triggerType: options?.triggerType || "weather",
     riskScore,
     fraudScore: fraudResult.fraud_score,
-    forceStatus
+    mlFactors,
+    modelVersion,
+    thresholdUsed: options?.thresholdUsed || { rainfall_threshold: threshold },
+    confidenceScore: confidence.confidence_score,
+    decisionReason: confidence.decision_reason,
+    requiresAdminReview: confidence.requiresAdminReview,
+    forceStatus: confidence.forceStatus
+  });
+
+  await logAudit("CLAIM_CREATED", user._id, {
+    claimId: claim?._id ? String(claim._id) : null,
+    city,
+    rainMm,
+    threshold,
+    riskScore,
+    fraudScore: fraudResult.fraud_score,
+    confidence: confidence.confidence_score,
+    status: claim?.status || null,
+    decisionReason: confidence.decision_reason,
+    modelVersion
   });
 
   logger.info("Fraud detection evaluated", {
@@ -278,6 +376,7 @@ async function evaluateClaimEligibility(user) {
     threshold,
     riskScore,
     fraudScore: fraudResult.fraud_score,
+    confidenceScore: confidence.confidence_score,
     weeklyPremium,
     eligible,
     status: claim?.status || (eligible ? "eligible" : "not_eligible"),
@@ -286,7 +385,7 @@ async function evaluateClaimEligibility(user) {
 }
 
 async function approveAndPayoutClaim(userId, claim) {
-  if (!claim || claim.status !== "eligible") {
+  if (!claim || claim.status !== "eligible" || claim.requiresAdminReview || Number(claim.confidence_score || 0) <= 0.6) {
     return claim;
   }
 
@@ -314,6 +413,12 @@ async function approveAndPayoutClaim(userId, claim) {
     payoutAmount: approvedClaim.payoutAmount
   });
 
+  await logAudit("PAYOUT_PROCESSED", userId, {
+    claimId: String(approvedClaim._id),
+    payoutAmount: Number(approvedClaim.payoutAmount || 0),
+    status: approvedClaim.status
+  });
+
   return approvedClaim;
 }
 
@@ -325,10 +430,18 @@ async function redeemEligibleClaim(user, claimId = null) {
 
   const query = {
     userId: user._id,
-    status: "eligible"
+    status: "eligible",
+    requiresAdminReview: { $ne: true }
   };
 
   if (claimId) {
+    const reviewedClaim = await Claim.findOne({ _id: claimId, userId: user._id }).select("requiresAdminReview status").lean();
+    if (reviewedClaim?.requiresAdminReview) {
+      const err = new Error("Claim is pending manual review.");
+      err.statusCode = 409;
+      err.errorCode = "MANUAL_REVIEW_REQUIRED";
+      throw err;
+    }
     query._id = claimId;
   }
 
@@ -400,8 +513,11 @@ async function redeemEligibleClaim(user, claimId = null) {
   return approvedClaim;
 }
 
-async function createAutoTriggeredClaim(user, triggerType = "weather") {
-  const result = await evaluateClaimEligibility(user);
+async function createAutoTriggeredClaim(user, triggerType = "weather", options = {}) {
+  const result = await evaluateClaimEligibility(user, {
+    ...options,
+    triggerType
+  });
   if (!result?.claim) {
     return result;
   }

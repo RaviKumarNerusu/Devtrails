@@ -24,6 +24,8 @@ def _load_model():
 
 
 model = _load_model()
+FEATURE_NAMES = ["temperature", "rainfall", "AQI", "past_claims", "location_risk"]
+MODEL_VERSION = "v1.0"
 
 
 @app.get("/")
@@ -58,7 +60,20 @@ def predict(payload: PredictRequest):
     prediction = float(model.predict(features)[0])
     risk_score = float(np.clip(prediction, 0.0, 1.0))
 
-    return {"risk_score": risk_score}
+    importances = getattr(model, "feature_importances_", None)
+    if importances is None or len(importances) != len(FEATURE_NAMES):
+        factors = {name: 0.0 for name in FEATURE_NAMES}
+    else:
+        factors = {
+            name: float(np.clip(importance, 0.0, 1.0))
+            for name, importance in zip(FEATURE_NAMES, importances)
+        }
+
+    return {
+        "risk_score": risk_score,
+        "factors": factors,
+        "model_version": MODEL_VERSION
+    }
 
 
 if __name__ == "__main__":

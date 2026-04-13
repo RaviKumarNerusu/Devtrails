@@ -18,6 +18,11 @@ function normalizeClaimPayload(claim) {
     ...claimObj,
     risk_score: Number(claimObj?.risk_score ?? 0),
     fraud_score: Number(claimObj?.fraud_score ?? 0),
+    confidence_score: Number(claimObj?.confidence_score ?? 0),
+    decision_reason: String(claimObj?.decision_reason || ""),
+    ml_factors: claimObj?.ml_factors || {},
+    model_version: String(claimObj?.model_version || "v1.0"),
+    threshold_used: claimObj?.threshold_used ?? null,
     trigger_type: claimObj?.trigger_type || claimObj?.triggerType || "weather",
     payout_amount: payout,
     status: claimObj?.status || "not_eligible"
