@@ -26,6 +26,15 @@ def _load_model():
 model = _load_model()
 
 
+@app.get("/")
+def root():
+    return {
+        "ok": True,
+        "service": "risk-ml-service",
+        "endpoints": ["/health", "/predict", "/docs"],
+    }
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "service": "risk-ml-service"}
