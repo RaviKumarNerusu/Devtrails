@@ -596,13 +596,13 @@ rateLimiter() // Should pass 5 requests
 
 ## 📋 Migration Checklist
 
-- [ ] Run `npm install` (no new packages needed)
+- [x] Run `npm install` (no new packages needed)
 - [ ] Update `.env` if needed (same env vars)
 - [ ] Create `/server/logs` directory (auto-created)
-- [ ] Test `/api/health` endpoint
-- [ ] Test `/api/claim/auto` with valid user
+- [x] Test `/api/health` endpoint
+- [x] Test `/api/claim/auto` with valid user
 - [ ] Test rate limiting (5 quick requests)
-- [ ] Test fraud scenarios (duplicate same day)
+- [x] Test fraud scenarios (duplicate same day)
 - [ ] Monitor logs in `/server/logs/claim-system-*.log`
 - [ ] Deploy to staging first
 - [ ] Monitor production logs

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../services/apiClient.js";
 import { getWeather } from "../services/weatherService.js";
@@ -30,6 +30,68 @@ function claimStatusLabel(claim) {
   return "Not Eligible Today";
 }
 
+const CITY_DIRECTORY = [
+  { city: "Brahmanidam", district: "Prakasam", state: "Andhra Pradesh", pincode: "523183", risk: "MEDIUM" },
+  { city: "Nidamanuru", district: "Krishna", state: "Andhra Pradesh", pincode: "521104", risk: "MEDIUM" },
+  { city: "Guntur", district: "Guntur", state: "Andhra Pradesh", pincode: "522002", risk: "MEDIUM" },
+  { city: "Vijayawada", district: "NTR", state: "Andhra Pradesh", pincode: "520001", risk: "HIGH" },
+  { city: "Visakhapatnam", district: "Visakhapatnam", state: "Andhra Pradesh", pincode: "530001", risk: "HIGH" },
+  { city: "Tirupati", district: "Tirupati", state: "Andhra Pradesh", pincode: "517501", risk: "MEDIUM" },
+  { city: "Kurnool", district: "Kurnool", state: "Andhra Pradesh", pincode: "518001", risk: "MEDIUM" },
+  { city: "Rajahmundry", district: "East Godavari", state: "Andhra Pradesh", pincode: "533101", risk: "MEDIUM" },
+  { city: "Nellore", district: "SPSR Nellore", state: "Andhra Pradesh", pincode: "524001", risk: "MEDIUM" },
+  { city: "Anantapur", district: "Anantapur", state: "Andhra Pradesh", pincode: "515001", risk: "LOW" },
+  { city: "Hyderabad", district: "Hyderabad", state: "Telangana", pincode: "500001", risk: "HIGH" },
+  { city: "Warangal", district: "Hanamkonda", state: "Telangana", pincode: "506002", risk: "MEDIUM" },
+  { city: "Bengaluru", district: "Bengaluru Urban", state: "Karnataka", pincode: "560001", risk: "HIGH" },
+  { city: "Chennai", district: "Chennai", state: "Tamil Nadu", pincode: "600001", risk: "HIGH" },
+  { city: "Mumbai", district: "Mumbai", state: "Maharashtra", pincode: "400001", risk: "HIGH" },
+  { city: "Pune", district: "Pune", state: "Maharashtra", pincode: "411001", risk: "MEDIUM" },
+  { city: "Delhi", district: "New Delhi", state: "Delhi", pincode: "110001", risk: "MEDIUM" },
+  { city: "Kolkata", district: "Kolkata", state: "West Bengal", pincode: "700001", risk: "HIGH" }
+];
+
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function findExactCityMatch(cityName) {
+  const needle = normalizeText(cityName);
+  if (!needle) return null;
+  return CITY_DIRECTORY.find((entry) => normalizeText(entry.city) === needle) || null;
+}
+
+function getCitySuggestions(query, limit = 6) {
+  const needle = normalizeText(query);
+  if (!needle) return [];
+
+  const startsWithCity = [];
+  const includesCity = [];
+
+  for (const entry of CITY_DIRECTORY) {
+    const city = normalizeText(entry.city);
+    const district = normalizeText(entry.district);
+    const state = normalizeText(entry.state);
+    const pincode = normalizeText(entry.pincode);
+    const isMatch = city.includes(needle) || district.includes(needle) || state.includes(needle) || pincode.includes(needle);
+    if (!isMatch) continue;
+    if (city.startsWith(needle)) {
+      startsWithCity.push(entry);
+    } else {
+      includesCity.push(entry);
+    }
+  }
+
+  return [...startsWithCity, ...includesCity].slice(0, limit);
+}
+
+function riskBadgeClass(risk) {
+  const normalized = String(risk || "").toUpperCase();
+  if (normalized === "HIGH" || normalized === "SEVERE") return "text-bg-danger";
+  if (normalized === "MEDIUM") return "text-bg-warning";
+  return "text-bg-success";
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [city, setCity] = useState("");
@@ -43,6 +105,7 @@ export default function DashboardPage() {
 
   const [profile, setProfile] = useState({
     city: "",
+    district: "",
     pincode: "",
     avgDailyEarning: "",
     rainThresholdMm: 15
@@ -58,8 +121,33 @@ export default function DashboardPage() {
   const [claimError, setClaimError] = useState("");
   const [profileSaveMessage, setProfileSaveMessage] = useState("");
   const [profileSaveError, setProfileSaveError] = useState("");
+  const [isProfileCityMenuOpen, setIsProfileCityMenuOpen] = useState(false);
+  const [activeCitySuggestionIndex, setActiveCitySuggestionIndex] = useState(-1);
+  const [cityAutoHint, setCityAutoHint] = useState("");
+  const cityMenuCloseTimerRef = useRef(null);
+  const citySuggestionItemRefs = useRef([]);
   const hasRiskScore = policyInfo?.riskScore !== null && policyInfo?.riskScore !== undefined;
   const hasWeeklyPremium = policyInfo?.weeklyPremium !== null && policyInfo?.weeklyPremium !== undefined;
+  const citySuggestions = useMemo(() => getCitySuggestions(profile.city), [profile.city]);
+
+  useEffect(() => {
+    if (!isProfileCityMenuOpen || citySuggestions.length === 0) {
+      setActiveCitySuggestionIndex(-1);
+      return;
+    }
+    if (activeCitySuggestionIndex >= citySuggestions.length) {
+      setActiveCitySuggestionIndex(0);
+    }
+  }, [citySuggestions, isProfileCityMenuOpen, activeCitySuggestionIndex]);
+
+  useEffect(() => {
+    if (!isProfileCityMenuOpen) return;
+    if (activeCitySuggestionIndex < 0) return;
+    const activeItem = citySuggestionItemRefs.current[activeCitySuggestionIndex];
+    if (activeItem && typeof activeItem.scrollIntoView === "function") {
+      activeItem.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeCitySuggestionIndex, isProfileCityMenuOpen]);
 
   const loadHistory = async () => {
     try {
@@ -85,6 +173,7 @@ export default function DashboardPage() {
       if (data && data.profile) {
         const nextProfile = {
           city: data.profile.city || "",
+          district: data.profile.district || data.profile.city || "",
           pincode: data.profile.pincode || "",
           avgDailyEarning: data.profile.avgDailyEarning?.toString() || "",
           rainThresholdMm: data.profile.rainThresholdMm || 15
@@ -96,6 +185,7 @@ export default function DashboardPage() {
           "partnerProfile",
           JSON.stringify({
             city: nextProfile.city,
+            district: nextProfile.district,
             pincode: nextProfile.pincode,
             avgEarning: Number(nextProfile.avgDailyEarning) || 0,
             threshold: Number(nextProfile.rainThresholdMm) || 15
@@ -112,6 +202,7 @@ export default function DashboardPage() {
       if (stored?.city) {
         const nextProfile = {
           city: stored.city,
+          district: stored.district || stored.city || "",
           pincode: stored.pincode || "",
           avgDailyEarning: String(stored.avgEarning ?? 0),
           rainThresholdMm: stored.threshold ?? 15
@@ -220,7 +311,27 @@ export default function DashboardPage() {
         await Promise.all([loadHistory(), loadFavorites()]);
       }
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to fetch weather");
+      const fallbackDistrict = String(profile?.district || "").trim();
+      const shouldTryDistrictFallback = fallbackDistrict && fallbackDistrict.toLowerCase() !== queryCity.toLowerCase();
+
+      if (shouldTryDistrictFallback) {
+        try {
+          const fallbackData = await getWeather(fallbackDistrict);
+          setWeather(fallbackData);
+          setAlerts(fallbackData?.alerts || []);
+          setCity(fallbackDistrict);
+          setActiveCity(fallbackDistrict);
+          setError(`__info__"${queryCity}" not found. Showing nearby district weather for ${fallbackDistrict}.`);
+          if (!opts.skipMetaRefresh) {
+            await Promise.all([loadHistory(), loadFavorites()]);
+          }
+          return;
+        } catch {
+          // District fallback failed; use original error path.
+        }
+      }
+
+      setError(err.response?.data?.message || `City "${queryCity}" not found`);
       setWeather(null);
       setAlerts([]);
     } finally {
@@ -242,6 +353,93 @@ export default function DashboardPage() {
       // ignore duplicate errors
     }
   };
+
+  const applyCitySuggestion = (entry) => {
+    if (!entry) return;
+    setProfile((prev) => ({ ...prev, city: entry.city, district: entry.district || entry.city, pincode: entry.pincode }));
+    setCityAutoHint(`Pincode ${entry.pincode} auto-filled for ${entry.city}.`);
+    setIsProfileCityMenuOpen(false);
+    setActiveCitySuggestionIndex(-1);
+  };
+
+  const handleProfileCityChange = (value) => {
+    setProfile((prev) => ({ ...prev, city: value }));
+    setCityAutoHint("");
+
+    const exactMatch = findExactCityMatch(value);
+    if (exactMatch) {
+      setProfile((prev) => ({
+        ...prev,
+        city: exactMatch.city,
+        district: exactMatch.district || exactMatch.city,
+        pincode: exactMatch.pincode
+      }));
+      setCityAutoHint(`Pincode ${exactMatch.pincode} auto-filled for ${exactMatch.city}.`);
+    }
+  };
+
+  const handleProfileCityFocus = () => {
+    if (cityMenuCloseTimerRef.current) {
+      clearTimeout(cityMenuCloseTimerRef.current);
+      cityMenuCloseTimerRef.current = null;
+    }
+    setIsProfileCityMenuOpen(true);
+    if (citySuggestions.length > 0) {
+      setActiveCitySuggestionIndex(0);
+    }
+  };
+
+  const handleProfileCityBlur = () => {
+    cityMenuCloseTimerRef.current = setTimeout(() => {
+      setIsProfileCityMenuOpen(false);
+      setActiveCitySuggestionIndex(-1);
+    }, 120);
+  };
+
+  const handleProfileCityKeyDown = (event) => {
+    if (!isProfileCityMenuOpen || citySuggestions.length === 0) {
+      if (event.key === "ArrowDown" && citySuggestions.length > 0) {
+        event.preventDefault();
+        setIsProfileCityMenuOpen(true);
+        setActiveCitySuggestionIndex(0);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveCitySuggestionIndex((prev) => (prev + 1) % citySuggestions.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveCitySuggestionIndex((prev) => (prev <= 0 ? citySuggestions.length - 1 : prev - 1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (activeCitySuggestionIndex >= 0) {
+        event.preventDefault();
+        applyCitySuggestion(citySuggestions[activeCitySuggestionIndex]);
+      }
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setIsProfileCityMenuOpen(false);
+      setActiveCitySuggestionIndex(-1);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cityMenuCloseTimerRef.current) {
+        clearTimeout(cityMenuCloseTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="row">
@@ -459,8 +657,8 @@ export default function DashboardPage() {
           </div>
         </form>
         {error && (
-          <div className="alert alert-danger" role="alert">
-            {error}
+          <div className={`alert ${error.startsWith("__info__") ? "alert-success" : "alert-danger"}`} role="alert">
+            {error.startsWith("__info__") ? error.replace("__info__", "") : error}
           </div>
         )}
         {weather && (
@@ -500,6 +698,7 @@ export default function DashboardPage() {
                   try {
                     await api.post("/partner/profile", {
                       city: profile.city,
+                      district: profile.district || profile.city,
                       pincode: profile.pincode,
                       avgDailyEarning: Number(profile.avgDailyEarning) || 0,
                       rainThresholdMm: Number(profile.rainThresholdMm) || 15
@@ -508,6 +707,7 @@ export default function DashboardPage() {
                       "partnerProfile",
                       JSON.stringify({
                         city: profile.city,
+                        district: profile.district || profile.city,
                         pincode: profile.pincode,
                         avgEarning: Number(profile.avgDailyEarning) || 0,
                         threshold: Number(profile.rainThresholdMm) || 15
@@ -529,11 +729,54 @@ export default function DashboardPage() {
                 }}
               >
                 <div className="mb-2">
-                  <label className="form-label small">City</label>
+                  <label className="form-label small">City &amp; Pincode</label>
+                  <div className="position-relative">
+                    <input
+                      className="form-control form-control-sm"
+                      value={profile.city}
+                      placeholder="Type city name"
+                      onChange={(e) => handleProfileCityChange(e.target.value)}
+                      onFocus={handleProfileCityFocus}
+                      onBlur={handleProfileCityBlur}
+                      onKeyDown={handleProfileCityKeyDown}
+                    />
+                    {isProfileCityMenuOpen && citySuggestions.length > 0 ? (
+                      <div className="ig-city-menu shadow-sm" role="listbox" aria-label="City suggestions">
+                        {citySuggestions.map((entry, index) => (
+                          <button
+                            key={`${entry.city}-${entry.pincode}`}
+                            type="button"
+                            className={`ig-city-menu-item ${index === activeCitySuggestionIndex ? "is-active" : ""}`}
+                            aria-selected={index === activeCitySuggestionIndex}
+                            ref={(element) => {
+                              citySuggestionItemRefs.current[index] = element;
+                            }}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              applyCitySuggestion(entry);
+                            }}
+                            onMouseEnter={() => setActiveCitySuggestionIndex(index)}
+                          >
+                            <div className="ig-city-menu-name">{entry.city}</div>
+                            <div className="ig-city-menu-meta">{entry.district}, {entry.state}</div>
+                            <div className="ig-city-menu-badges">
+                              <span className="badge text-bg-info">{entry.pincode}</span>
+                              <span className={`badge ${riskBadgeClass(entry.risk)}`}>{entry.risk} Risk</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {cityAutoHint ? <div className="small text-success mt-1">{cityAutoHint}</div> : null}
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small">District (fallback if city unavailable)</label>
                   <input
                     className="form-control form-control-sm"
-                    value={profile.city}
-                    onChange={(e) => setProfile((p) => ({ ...p, city: e.target.value }))}
+                    value={profile.district || ""}
+                    onChange={(e) => setProfile((p) => ({ ...p, district: e.target.value }))}
+                    placeholder="Enter district"
                   />
                 </div>
                 <div className="mb-2">

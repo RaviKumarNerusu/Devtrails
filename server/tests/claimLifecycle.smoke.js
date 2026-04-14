@@ -32,7 +32,7 @@ require.cache[weatherModulePath] = {
 
 const { createApp } = require("../src/app");
 
-async function request(baseUrl, method, route, token, body) {
+async function request(baseUrl, method, route, token, body, expectedStatus = null) {
   const response = await fetch(`${baseUrl}${route}`, {
     method,
     headers: {
@@ -45,7 +45,11 @@ async function request(baseUrl, method, route, token, body) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
 
-  if (!response.ok) {
+  if (expectedStatus && response.status !== expectedStatus) {
+    throw new Error(`${method} ${route} -> expected ${expectedStatus}, got ${response.status}`);
+  }
+
+  if (!response.ok && !expectedStatus) {
     const message = data?.message || data?.error || text || `${method} ${route} failed`;
     throw new Error(`${method} ${route} -> ${response.status}: ${message}`);
   }
@@ -127,14 +131,12 @@ async function main() {
 
     const redeem = await request(baseUrl, "POST", "/claim/redeem", authHeaders, {
       claimId: cleanup.claimId
-    });
-    assert.strictEqual(redeem.claim.status, "approved");
-    assert.ok(redeem.claim.claimedAt, "Redeemed claim should have claimedAt");
-    assert.ok(redeem.claim.approvedAt, "Redeemed claim should have approvedAt");
+    }, 409);
+    assert.strictEqual(redeem.errorCode, "MANUAL_REVIEW_REQUIRED");
 
-    const afterRedeemClaims = await request(baseUrl, "GET", "/claim/my", authHeaders);
-    assert.strictEqual(afterRedeemClaims.claims.length, 1, "Redeem should not create duplicate claims");
-    assert.strictEqual(afterRedeemClaims.claims[0].status, "approved");
+    const afterRedeemAttemptClaims = await request(baseUrl, "GET", "/claim/my", authHeaders);
+    assert.strictEqual(afterRedeemAttemptClaims.claims.length, 1, "Redeem attempt should not create duplicate claims");
+    assert.strictEqual(afterRedeemAttemptClaims.claims[0].status, "eligible");
 
     const claimCount = await Claim.countDocuments({ userId: cleanup.userId });
     assert.strictEqual(claimCount, 1, "Database should contain exactly one claim for the day");

@@ -111,7 +111,7 @@ export default function ClaimsPage() {
   if (loading) return <div>Loading claims...</div>;
 
   return (
-    <div>
+    <div className="claims-page">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2 className="mb-0">Claims</h2>
         <button className="btn btn-outline-primary" onClick={handleCheckEligibility} disabled={checking || !policyActive}>
@@ -146,13 +146,13 @@ export default function ClaimsPage() {
           </button>
         </div>
       ) : policyActive ? (
-        <div className="alert alert-secondary" role="alert">
+        <div className="alert alert-secondary claims-neutral-alert" role="alert">
           Not Eligible Today
         </div>
       ) : null}
 
       {claims.length === 0 ? (
-        <div className="alert alert-secondary">Daily claim records will appear after profile and plan setup.</div>
+        <div className="alert alert-secondary claims-neutral-alert">Daily claim records will appear after profile and plan setup.</div>
       ) : (
         <div className="row g-3">
           {claims.map((c) => (
@@ -163,17 +163,17 @@ export default function ClaimsPage() {
                     <div className="fw-semibold">{c.city || "-"}</div>
                     <span className={`badge text-capitalize ${statusBadgeClass(c.status)}`}>{statusLabel(c.status)}</span>
                   </div>
-                  <div className="small text-muted mb-2">
+                  <div className="small text-muted claim-meta mb-2">
                     Rain: {Number(c.rainMm || 0).toFixed(1)} mm · Risk: {c.riskLevel || "-"} · Amount: ₹
                     {Number((c.amount ?? c.payoutAmount) || 0).toFixed(0)}
                   </div>
-                  <div className="small text-muted mb-2">
+                  <div className="small text-muted claim-meta mb-2">
                     Risk Score: {c?.risk_score ?? c?.riskScore ?? "N/A"} · Fraud Score: {c?.fraud_score ?? c?.fraudScore ?? "N/A"}
                   </div>
-                  <div className="small text-muted mb-2">
+                  <div className="small text-muted claim-meta mb-2">
                     Status: {c?.status || "N/A"} · Payout: ₹{Number(c?.payout_amount ?? c?.payoutAmount ?? 0).toFixed(0)}
                   </div>
-                  <div className="small text-muted mb-2">Trigger: {(c.triggerType || "weather").toUpperCase()}</div>
+                  <div className="small text-muted claim-meta mb-2">Trigger: {(c.triggerType || "weather").toUpperCase()}</div>
                   <ClaimTimeline claim={c} />
                 </div>
               </div>
