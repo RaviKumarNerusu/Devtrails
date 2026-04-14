@@ -11,6 +11,14 @@ function rainFromCurrent(data) {
   return Number(data?.rain?.["1h"] || data?.rain?.["3h"] || 0) || 0;
 }
 
+function temperatureFromCurrent(data) {
+  return Number(data?.main?.temp ?? data?.temp ?? 0) || 0;
+}
+
+function aqiFromCurrent(data) {
+  return Number(data?.main?.aqi ?? data?.aqi ?? 0) || 0;
+}
+
 async function createPolicy(req, res, next) {
   try {
     const userId = req.user?._id;
@@ -25,7 +33,13 @@ async function createPolicy(req, res, next) {
     const threshold = Number(profile?.rainThresholdMm || 15);
     const user = await User.findById(userId).lean();
     const current = await fetchCurrentWeather(city);
-    const weather = { rainMm: rainFromCurrent(current), threshold };
+    const weather = {
+      rainMm: rainFromCurrent(current),
+      temperature: temperatureFromCurrent(current),
+      aqi: aqiFromCurrent(current),
+      threshold,
+      heatThreshold: Number(process.env.TRIGGER_HEAT_THRESHOLD || 35)
+    };
 
     const triggerResult = runAutomationTriggers({ weather, user, location: city });
     const premiumBase = calculatePremium(user, weather, { location: city });
@@ -78,7 +92,13 @@ async function calculatePremiumEndpoint(req, res, next) {
     const city = String(req.body?.location || profile?.city || "Bangalore");
     const threshold = Number(req.body?.threshold || profile?.rainThresholdMm || 15);
     const current = await fetchCurrentWeather(city);
-    const weather = { rainMm: rainFromCurrent(current), threshold };
+    const weather = {
+      rainMm: rainFromCurrent(current),
+      temperature: temperatureFromCurrent(current),
+      aqi: aqiFromCurrent(current),
+      threshold,
+      heatThreshold: Number(process.env.TRIGGER_HEAT_THRESHOLD || 35)
+    };
 
     const triggerResult = runAutomationTriggers({ weather, user, location: city });
     const base = calculatePremium(user, weather, { location: city });
@@ -116,7 +136,10 @@ async function getTriggerStatus(req, res, next) {
     const current = await fetchCurrentWeather(city);
     const weather = {
       rainMm: rainFromCurrent(current),
+      temperature: temperatureFromCurrent(current),
+      aqi: aqiFromCurrent(current),
       threshold,
+      heatThreshold: Number(process.env.TRIGGER_HEAT_THRESHOLD || 35),
       condition: current?.weather?.[0]?.main || "Unknown"
     };
 

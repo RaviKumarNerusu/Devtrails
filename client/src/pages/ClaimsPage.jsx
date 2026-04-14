@@ -7,6 +7,8 @@ import ClaimTimeline from "../components/ClaimTimeline.jsx";
 function triggerLabel(claim) {
   const raw = String(claim?.trigger_type || claim?.triggerType || "rain").toLowerCase();
   const labels = {
+    weather: "Rain",
+    event: "Social",
     rain: "Rain",
     heat: "Heat",
     pollution: "Pollution",

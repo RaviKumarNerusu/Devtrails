@@ -12,49 +12,76 @@ const {
 } = require("../utils/disruptionRules");
 const logger = require("../utils/logger");
 
+function buildThresholdBundle(weather = {}) {
+  const rainfallThreshold = toNumber(
+    weather?.threshold ?? weather?.rainThreshold ?? process.env.TRIGGER_RAIN_THRESHOLD ?? 15,
+    15
+  );
+  const heatThreshold = toNumber(weather?.heatThreshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 35, 35);
+  const pollutionThreshold = toNumber(weather?.pollutionThreshold ?? process.env.TRIGGER_AQI_THRESHOLD ?? 150, 150);
+  const floodThreshold = toNumber(weather?.floodThreshold ?? Math.max(rainfallThreshold * 1.5, rainfallThreshold + 10), rainfallThreshold);
+
+  return {
+    rainfall_threshold: rainfallThreshold,
+    heat_threshold: heatThreshold,
+    pollution_threshold: pollutionThreshold,
+    flood_threshold: floodThreshold
+  };
+}
+
 function runAutomationTriggers({ weather, user, location, activityDrop }) {
+  const rainMm = Number(weather?.rainMm || 0);
+  const temperature = Number(weather?.temperature ?? weather?.temp ?? 0);
+  const aqi = Number(weather?.aqi ?? 0);
+  const thresholds = buildThresholdBundle(weather);
+  const socialEvent = weather?.socialEvent || buildMockSocialEvent({ userId: user?._id, city: location });
+
+  const disruption = resolveDisruptionTrigger({
+    rainfall: rainMm,
+    temperature,
+    aqi,
+    thresholds,
+    socialEvent
+  });
+
   const triggers = [];
 
-  const rainMm = Number(weather?.rainMm || 0);
-  const threshold = Number(weather?.threshold || 0);
+  triggers.push({ type: "rain", hit: disruption.trigger_type === "rain", premiumDelta: disruption.trigger_type === "rain" ? 20 : 0, claim: disruption.trigger_type === "rain" });
+  triggers.push({ type: "heat", hit: disruption.trigger_type === "heat", premiumDelta: disruption.trigger_type === "heat" ? 15 : 0, claim: disruption.trigger_type === "heat" });
+  triggers.push({ type: "pollution", hit: disruption.trigger_type === "pollution", premiumDelta: disruption.trigger_type === "pollution" ? 15 : 0, claim: disruption.trigger_type === "pollution" });
+  triggers.push({ type: "flood", hit: disruption.trigger_type === "flood", premiumDelta: disruption.trigger_type === "flood" ? 25 : 0, claim: disruption.trigger_type === "flood" });
+  triggers.push({ type: "social", hit: disruption.trigger_type === "social", premiumDelta: disruption.trigger_type === "social" ? 10 : 0, claim: disruption.trigger_type === "social" });
+
+  // Preserve legacy trigger labels for older screens while the new disruption model is adopted.
   const now = new Date();
   const hour = now.getHours();
-
-  // 1) Weather Trigger
-  if (threshold > 0 && rainMm >= threshold) {
-    triggers.push({ type: "weather", hit: true, premiumDelta: 20, claim: true });
-  } else {
-    triggers.push({ type: "weather", hit: false, premiumDelta: 0, claim: false });
-  }
-
-  // 2) Time Trigger
   const isNight = hour >= 20 || hour <= 6;
-  triggers.push({ type: "time", hit: isNight, premiumDelta: isNight ? 10 : 0, claim: false });
-
-  // 3) Location Trigger
   const loc = String(location || "").toLowerCase();
   const highRiskZone = ["industrial", "flood", "coastal", "high-risk", "lowland", "high_risk_area", "flood_zone"].some((k) =>
     loc.includes(k)
   );
-  triggers.push({ type: "location", hit: highRiskZone, premiumDelta: highRiskZone ? 30 : 0, claim: false });
-
-  // 4) Event Trigger
   const userActivityDrop = activityDrop === true || Number(user?.safeDays || 0) <= 1;
-  triggers.push({ type: "event", hit: userActivityDrop, premiumDelta: userActivityDrop ? 10 : 0, claim: userActivityDrop });
 
-  // 5) Claim Trigger (derived)
-  const aggregatedRisk =
-    (triggers.find((t) => t.type === "weather")?.hit ? 1 : 0) +
-    (triggers.find((t) => t.type === "time")?.hit ? 1 : 0) +
-    (triggers.find((t) => t.type === "location")?.hit ? 1 : 0) +
-    (triggers.find((t) => t.type === "event")?.hit ? 1 : 0);
-  const claimTrigger = aggregatedRisk >= 2 || (threshold > 0 && rainMm >= threshold);
+  triggers.push({ type: "weather", hit: disruption.trigger_type === "rain", premiumDelta: 20, claim: disruption.trigger_type === "rain" });
+  triggers.push({ type: "time", hit: disruption.trigger_type === "heat" || isNight, premiumDelta: disruption.trigger_type === "heat" ? 15 : isNight ? 10 : 0, claim: disruption.trigger_type === "heat" });
+  triggers.push({ type: "location", hit: highRiskZone, premiumDelta: highRiskZone ? 30 : 0, claim: false });
+  triggers.push({ type: "event", hit: disruption.trigger_type === "social" || userActivityDrop, premiumDelta: disruption.trigger_type === "social" ? 10 : userActivityDrop ? 10 : 0, claim: disruption.trigger_type === "social" || userActivityDrop });
+
+  const claimTrigger = Boolean(disruption.trigger_type) || highRiskZone || userActivityDrop;
   triggers.push({ type: "claim", hit: claimTrigger, premiumDelta: 0, claim: claimTrigger });
 
   return {
     triggers,
     premiumDelta: triggers.reduce((sum, t) => sum + (t.premiumDelta || 0), 0),
-    shouldCreateClaim: claimTrigger
+    shouldCreateClaim: claimTrigger,
+    triggerType: disruption.trigger_type,
+    weatherData: {
+      rainfall: rainMm,
+      temperature,
+      aqi,
+      thresholds,
+      socialEvent
+    }
   };
 }
 
