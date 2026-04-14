@@ -20,6 +20,7 @@ const claimRoutes = require("./routes/claimRoutes");
 const premiumRoutes = require("./routes/premiumRoutes");
 const triggerRoutes = require("./routes/triggerRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const { startClaimAutomationScheduler } = require("./services/claimAutomationScheduler");
 const { startParametricTriggerEngine } = require("./services/triggerService");
 
@@ -46,6 +47,7 @@ app.use("/api/claim", claimRoutes);
 app.use("/api/premium", premiumRoutes);
 app.use("/api/trigger", triggerRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

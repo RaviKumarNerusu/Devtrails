@@ -17,6 +17,7 @@ const claimRoutes = require("../routes/claimRoutes");
 const premiumRoutes = require("../routes/premiumRoutes");
 const triggerRoutes = require("../routes/triggerRoutes");
 const dashboardRoutes = require("../routes/dashboardRoutes");
+const adminRoutes = require("../routes/adminRoutes");
 
 function createApp() {
   const app = express();
@@ -52,6 +53,7 @@ function createApp() {
   app.use("/api/premium", premiumRoutes);
   app.use("/api/trigger", triggerRoutes);
   app.use("/api/dashboard", dashboardRoutes);
+  app.use("/api/admin", adminRoutes);
 
   /**
    * Error handling middleware (must be last)

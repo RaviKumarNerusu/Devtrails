@@ -8,6 +8,7 @@ const { getFraudScore } = require("./fraudService");
 const { calculatePremium } = require("../utils/premiumCalculator");
 const { simulateClaimPayout } = require("./payoutService");
 const { logAudit } = require("./auditLogService");
+const { normalizeTriggerType, toNumber } = require("../utils/disruptionRules");
 const {
   extractRainSafely,
   getLocalDateOnly,
@@ -51,6 +52,66 @@ function clamp01(value) {
   if (n <= 0) return 0;
   if (n >= 1) return 1;
   return n;
+}
+
+function resolveClaimTriggerContext({
+  triggerType = "rain",
+  rainMm = 0,
+  temperature = 0,
+  aqi = 0,
+  socialEvent = null,
+  threshold = 0,
+  thresholdUsed = {}
+} = {}) {
+  const normalizedTriggerType = normalizeTriggerType(triggerType);
+  const rainfallThreshold = toNumber(
+    thresholdUsed.rainfall_threshold ?? threshold ?? process.env.TRIGGER_RAIN_THRESHOLD ?? 15,
+    15
+  );
+  const heatThreshold = toNumber(thresholdUsed.heat_threshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 40, 40);
+  const pollutionThreshold = toNumber(thresholdUsed.pollution_threshold ?? process.env.TRIGGER_AQI_THRESHOLD ?? 150, 150);
+  const floodThreshold = toNumber(
+    thresholdUsed.flood_threshold ?? Math.max(rainfallThreshold > 0 ? rainfallThreshold * 1.5 : 0, rainfallThreshold + 10),
+    0
+  );
+
+  let eligible = false;
+  switch (normalizedTriggerType) {
+    case "heat":
+      eligible = toNumber(temperature, 0) > heatThreshold;
+      break;
+    case "pollution":
+      eligible = toNumber(aqi, 0) > pollutionThreshold;
+      break;
+    case "flood":
+      eligible = toNumber(rainMm, 0) > floodThreshold;
+      break;
+    case "social":
+      eligible = Boolean(socialEvent?.active);
+      break;
+    case "rain":
+    default:
+      eligible = toNumber(rainMm, 0) > rainfallThreshold;
+      break;
+  }
+
+  return {
+    triggerType: normalizedTriggerType,
+    trigger_type: normalizedTriggerType,
+    eligible,
+    metrics: {
+      rainMm: toNumber(rainMm, 0),
+      temperature: toNumber(temperature, 0),
+      aqi: toNumber(aqi, 0)
+    },
+    thresholds: {
+      rainfall_threshold: rainfallThreshold,
+      heat_threshold: heatThreshold,
+      pollution_threshold: pollutionThreshold,
+      flood_threshold: floodThreshold
+    },
+    socialEvent
+  };
 }
 
 function deriveConfidenceDecision(riskScore, fraudScore, eligible) {
@@ -154,7 +215,8 @@ async function upsertDailyClaimRecord({
   confidenceScore = 0,
   decisionReason = "",
   requiresAdminReview = false,
-  forceStatus = null
+  forceStatus = null,
+  fraudReason = ""
 }) {
   const claimDate = getLocalDateOnly();
   let nextStatus = forceStatus || (eligible ? "eligible" : "not_eligible");
@@ -195,6 +257,7 @@ async function upsertDailyClaimRecord({
     threshold_used: thresholdUsed,
     confidence_score: Number.isFinite(Number(confidenceScore)) ? clamp01(confidenceScore) : 0,
     decision_reason: String(decisionReason || ""),
+    fraud_reason: String(fraudReason || ""),
     requiresAdminReview: Boolean(requiresAdminReview),
     adminReviewReason: requiresAdminReview ? String(decisionReason || "manual_review_required") : "",
     status: nextStatus
@@ -222,6 +285,7 @@ async function upsertDailyClaimRecord({
         threshold_used: thresholdUsed,
         confidence_score: Number.isFinite(Number(confidenceScore)) ? clamp01(confidenceScore) : 0,
         decision_reason: String(decisionReason || ""),
+        fraud_reason: String(fraudReason || ""),
         requiresAdminReview: Boolean(requiresAdminReview),
         adminReviewReason: requiresAdminReview ? String(decisionReason || "manual_review_required") : "",
         status: nextStatus,
@@ -267,16 +331,35 @@ async function evaluateClaimEligibility(user, options = {}) {
   const profileThreshold = Number(profile?.rainThresholdMm || 15);
   const threshold = Number(options?.dynamicThreshold ?? profileThreshold);
 
-  const currentWeather = await fetchCurrentWeather(city);
-  const rainMm = extractRainSafely(currentWeather, 1);
-  validateWeatherData(rainMm, threshold);
-  const eligible = rainMm >= threshold;
+  const currentWeather = options?.currentWeather || options?.weatherData || await fetchCurrentWeather(city);
+  const rainMm = Number(options?.weatherData?.rainfall ?? extractRainSafely(currentWeather, 1));
+  const temperature = Number(
+    options?.weatherData?.temperature ?? currentWeather?.main?.temp ?? currentWeather?.temperature ?? 0
+  ) || 0;
+  const aqi = Number(options?.weatherData?.aqi ?? currentWeather?.main?.aqi ?? currentWeather?.aqi ?? 50) || 50;
+  const socialEvent = options?.socialEvent || options?.weatherData?.socialEvent || null;
+
+  const triggerContext = resolveClaimTriggerContext({
+    triggerType: options?.triggerType || "rain",
+    rainMm,
+    temperature,
+    aqi,
+    socialEvent,
+    threshold,
+    thresholdUsed: options?.thresholdUsed || options?.weatherData?.thresholds || {}
+  });
+
+  if (triggerContext.triggerType === "rain") {
+    validateWeatherData(rainMm, triggerContext.thresholds.rainfall_threshold);
+  }
+
+  const eligible = triggerContext.eligible;
 
   const pastClaims = await Claim.countDocuments({ userId: user._id });
   const mlInput = {
-    temperature: Number(currentWeather?.main?.temp ?? 0) || 0,
+    temperature,
     rainfall: rainMm,
-    aqi: Number(currentWeather?.main?.aqi ?? currentWeather?.aqi ?? 50) || 50,
+    aqi,
     past_claims: pastClaims,
     location_risk: inferLocationRisk(city)
   };
@@ -292,15 +375,23 @@ async function evaluateClaimEligibility(user, options = {}) {
     threshold,
     triggeredByWeather: eligible,
     isAutoTriggered: true,
-    triggerType: options?.triggerType || "weather",
+    triggerType: triggerContext.triggerType,
+    temperature,
+    heatThreshold: triggerContext.thresholds.heat_threshold,
+    aqi,
+    pollutionThreshold: triggerContext.thresholds.pollution_threshold,
+    floodThreshold: triggerContext.thresholds.flood_threshold,
+    socialEvent,
     riskScore,
-    locationMismatch
+    locationMismatch,
+    weatherData: options?.weatherData || null
   });
 
   const confidence = deriveConfidenceDecision(riskScore, fraudResult.fraud_score, eligible);
   const weeklyPremium = calculatePremium(riskScore);
 
   console.log("Fraud Score:", fraudResult.fraud_score);
+  console.log("Fraud Reason:", fraudResult.fraud_reason);
   console.log("Confidence:", confidence.confidence_score);
   console.log("Threshold:", threshold);
   console.log("Premium:", weeklyPremium);
@@ -331,9 +422,10 @@ async function evaluateClaimEligibility(user, options = {}) {
     triggerType: options?.triggerType || "weather",
     riskScore,
     fraudScore: fraudResult.fraud_score,
+    fraudReason: fraudResult.fraud_reason,
     mlFactors,
     modelVersion,
-    thresholdUsed: options?.thresholdUsed || { rainfall_threshold: threshold },
+    thresholdUsed: options?.thresholdUsed || options?.weatherData?.thresholds || { rainfall_threshold: threshold },
     confidenceScore: confidence.confidence_score,
     decisionReason: confidence.decision_reason,
     requiresAdminReview: confidence.requiresAdminReview,
@@ -347,6 +439,7 @@ async function evaluateClaimEligibility(user, options = {}) {
     threshold,
     riskScore,
     fraudScore: fraudResult.fraud_score,
+    fraudReason: fraudResult.fraud_reason,
     confidence: confidence.confidence_score,
     status: claim?.status || null,
     decisionReason: confidence.decision_reason,
@@ -514,9 +607,10 @@ async function redeemEligibleClaim(user, claimId = null) {
 }
 
 async function createAutoTriggeredClaim(user, triggerType = "weather", options = {}) {
+  const normalizedTriggerType = normalizeTriggerType(triggerType);
   const result = await evaluateClaimEligibility(user, {
     ...options,
-    triggerType
+    triggerType: normalizedTriggerType
   });
   if (!result?.claim) {
     return result;
@@ -531,17 +625,17 @@ async function createAutoTriggeredClaim(user, triggerType = "weather", options =
     result.eligible = true;
   }
 
-  if (triggerType && result.claim.trigger_type !== triggerType) {
+  if (normalizedTriggerType && result.claim.trigger_type !== normalizedTriggerType) {
     result.claim = await Claim.findByIdAndUpdate(
       result.claim._id,
-      { $set: { triggerType, trigger_type: triggerType } },
+      { $set: { triggerType: normalizedTriggerType, trigger_type: normalizedTriggerType } },
       { new: true }
     );
   }
 
   logger.info("Auto claim processed", {
     userId: user._id.toString(),
-    triggerType,
+    triggerType: normalizedTriggerType,
     claimStatus: result.claim.status,
     payoutAmount: result.claim.payoutAmount,
     riskScore: result.claim.risk_score,
@@ -613,6 +707,7 @@ module.exports = {
   isClaimEligibleStatus,
   getActivePolicyOrThrow,
   upsertDailyClaimRecord,
+  resolveClaimTriggerContext,
   evaluateClaimEligibility,
   createAutoTriggeredClaim,
   redeemEligibleClaim,

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "test:claim": "node tests/claimLifecycle.smoke.js"
+    "test:claim": "node tests/claimLifecycle.smoke.js",
+    "test:multi-disruption": "node tests/multiDisruption.smoke.js"
   },
   "keywords": [],
   "author": "",

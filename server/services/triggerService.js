@@ -5,6 +5,11 @@ const Claim = require("../models/Claim");
 const PartnerProfile = require("../models/PartnerProfile");
 const { fetchCurrentWeather, fetchFiveDayForecast } = require("./openWeatherService");
 const { createAutoTriggeredClaim } = require("./claimService");
+const {
+  buildMockSocialEvent,
+  resolveDisruptionTrigger,
+  toNumber
+} = require("../utils/disruptionRules");
 const logger = require("../utils/logger");
 
 function runAutomationTriggers({ weather, user, location, activityDrop }) {
@@ -120,7 +125,7 @@ async function computeDynamicThresholds({ userId, city, fallbackRainThreshold = 
 }
 
 async function processHourlyParametricTriggers() {
-  const aqiThreshold = Number(process.env.TRIGGER_AQI_THRESHOLD || 150);
+  const aqiThreshold = toNumber(process.env.TRIGGER_AQI_THRESHOLD || 150, 150);
 
   const activePolicies = await Policy.find({ isActive: true }).select("userId").lean();
   const userIds = Array.from(new Set(activePolicies.map((item) => String(item.userId)).filter(Boolean)));
@@ -155,13 +160,33 @@ async function processHourlyParametricTriggers() {
       const riskMultiplier = userRisk > 0.7 ? 0.9 : 1;
       const rainThreshold = Number((dynamicThresholds.rainfallThreshold * riskMultiplier).toFixed(2));
       const tempThreshold = Number((dynamicThresholds.temperatureThreshold * riskMultiplier).toFixed(2));
+      const floodThreshold = Number(Math.max(rainThreshold * 1.5, rainThreshold + 10).toFixed(2));
+      const socialEvent = buildMockSocialEvent({ userId, city });
+      const weatherData = {
+        rainfall,
+        temperature,
+        aqi,
+        thresholds: {
+          rainfall_threshold: rainThreshold,
+          heat_threshold: tempThreshold,
+          pollution_threshold: aqiThreshold,
+          flood_threshold: floodThreshold
+        },
+        socialEvent
+      };
 
-      console.log("Threshold:", rainThreshold);
+      const triggerDecision = resolveDisruptionTrigger({
+        rainfall,
+        temperature,
+        aqi,
+        thresholds: weatherData.thresholds,
+        socialEvent
+      });
 
-      let triggerType = null;
-      if (rainfall > rainThreshold) triggerType = "weather";
-      else if (temperature > tempThreshold) triggerType = "time";
-      else if (aqi > aqiThreshold) triggerType = "event";
+      console.log("Trigger Type:", triggerDecision.trigger_type);
+      console.log("Weather Data:", weatherData);
+
+      let triggerType = triggerDecision.trigger_type;
 
       if (!triggerType) {
         logger.debug("Trigger engine evaluated with no action", {
@@ -176,10 +201,14 @@ async function processHourlyParametricTriggers() {
 
       await createAutoTriggeredClaim(user, triggerType, {
         dynamicThreshold: rainThreshold,
+        currentWeather: weather,
+        weatherData,
+        socialEvent,
         thresholdUsed: {
           rainfall_threshold: rainThreshold,
           temperature_threshold: tempThreshold,
           aqi_threshold: aqiThreshold,
+          flood_threshold: floodThreshold,
           risk_multiplier: riskMultiplier,
           dynamic_details: dynamicThresholds.details
         }

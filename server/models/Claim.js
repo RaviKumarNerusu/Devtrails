@@ -23,10 +23,11 @@ const claimSchema = new mongoose.Schema(
     payoutAmount: { type: Number, default: 0, min: 0 },
     maxPayoutAmount: { type: Number, default: 0, min: 0 }, // Capped payout
     autoTriggered: { type: Boolean, default: true },
-    triggerType: { type: String, enum: ["weather", "time", "location", "event"], default: "weather" },
-    trigger_type: { type: String, default: "weather" },
+    triggerType: { type: String, enum: ["weather", "time", "location", "event", "rain", "heat", "pollution", "flood", "social"], default: "rain" },
+    trigger_type: { type: String, default: "rain" },
     risk_score: { type: Number, default: 0, min: 0, max: 1 },
     fraud_score: { type: Number, default: 0, min: 0, max: 1 },
+    fraud_reason: { type: String, trim: true, default: "" },
     ml_factors: { type: mongoose.Schema.Types.Mixed, default: {} },
     model_version: { type: String, default: "v1.0" },
     threshold_used: { type: mongoose.Schema.Types.Mixed, default: null },
