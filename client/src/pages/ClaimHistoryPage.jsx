@@ -31,6 +31,18 @@ export default function ClaimHistoryPage() {
     return key;
   }
 
+  function triggerLabel(claim) {
+    const raw = String(claim?.trigger_type || claim?.triggerType || "rain").toLowerCase();
+    const labels = {
+      rain: "Rain",
+      heat: "Heat",
+      pollution: "Pollution",
+      flood: "Flood",
+      social: "Social"
+    };
+    return labels[raw] || raw.toUpperCase();
+  }
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -128,6 +140,7 @@ export default function ClaimHistoryPage() {
                   <td>
                     ₹{Number(p.payout_amount || p.payoutAmount || p.amount || 0).toFixed(0)}
                     <div className="small text-muted">Risk: {p?.risk_score ?? p?.riskScore ?? "N/A"} · Fraud: {p?.fraud_score ?? p?.fraudScore ?? "N/A"}</div>
+                    <div className="small text-muted">Trigger: {triggerLabel(p)}{p?.fraud_reason ? ` · Reason: ${p.fraud_reason}` : ""}</div>
                   </td>
                   <td>
                     <span className={`badge text-capitalize ${statusBadgeClass(p.status)}`}>

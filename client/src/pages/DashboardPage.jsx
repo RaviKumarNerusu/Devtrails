@@ -92,6 +92,12 @@ function riskBadgeClass(risk) {
   return "text-bg-success";
 }
 
+function formatRisk(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return "--";
+  return numberValue.toFixed(2);
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [city, setCity] = useState("");
@@ -237,13 +243,25 @@ export default function DashboardPage() {
           weeklyPremium: summary?.policy?.weekly_premium ?? summary?.policy?.weeklyPremium ?? 0,
           riskScore: summary?.user?.risk_score ?? summary?.claim?.risk_score ?? 0,
           riskLevel: summary?.policy?.riskLevel ?? "low",
+          nextWeekRisk: summary?.next_week_risk ?? 0,
+          avgRisk: summary?.avg_risk ?? 0,
+          totalClaimsLastWeek: summary?.total_claims_last_week ?? 0,
           isActive: true
         });
         setTodayClaim(summary.claim || null);
         setClaimSummary(summary.claimSummary || { total: 0, paid: 0 });
         setRecentClaims(Array.isArray(summary.recentClaims) ? summary.recentClaims : []);
       } else {
-        setPolicyInfo({ dynamicPremium: 0, weeklyPremium: null, riskScore: null, riskLevel: "low", isActive: false });
+        setPolicyInfo({
+          dynamicPremium: 0,
+          weeklyPremium: null,
+          riskScore: null,
+          riskLevel: "low",
+          nextWeekRisk: summary?.next_week_risk ?? 0,
+          avgRisk: summary?.avg_risk ?? 0,
+          totalClaimsLastWeek: summary?.total_claims_last_week ?? 0,
+          isActive: false
+        });
         setTodayClaim(null);
         setClaimSummary({ total: 0, paid: 0 });
         setRecentClaims([]);
@@ -487,6 +505,23 @@ export default function DashboardPage() {
                 <div className="small text-muted">Claim history</div>
                 <div className="h5 mb-0">
                   {claimSummary.paid}/{claimSummary.total} paid
+                </div>
+              </div>
+            </div>
+            <div className="border-top pt-3 mt-3">
+              <div className="small text-muted mb-1">Prediction snapshot</div>
+              <div className="d-flex flex-wrap gap-3 small">
+                <div>
+                  <div className="text-muted">Next week risk</div>
+                  <div className="fw-semibold">{formatRisk(policyInfo.nextWeekRisk)}</div>
+                </div>
+                <div>
+                  <div className="text-muted">Average risk</div>
+                  <div className="fw-semibold">{formatRisk(policyInfo.avgRisk)}</div>
+                </div>
+                <div>
+                  <div className="text-muted">Claims last 7 days</div>
+                  <div className="fw-semibold">{Number(policyInfo.totalClaimsLastWeek || 0).toFixed(0)}</div>
                 </div>
               </div>
             </div>

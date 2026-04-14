@@ -4,6 +4,18 @@ import { getPolicyByUserId } from "../services/policyService.js";
 import { useAuth } from "../authContext.jsx";
 import ClaimTimeline from "../components/ClaimTimeline.jsx";
 
+function triggerLabel(claim) {
+  const raw = String(claim?.trigger_type || claim?.triggerType || "rain").toLowerCase();
+  const labels = {
+    rain: "Rain",
+    heat: "Heat",
+    pollution: "Pollution",
+    flood: "Flood",
+    social: "Social"
+  };
+  return labels[raw] || raw.toUpperCase();
+}
+
 export default function ClaimsPage() {
   const { user } = useAuth();
   const [claims, setClaims] = useState([]);
@@ -173,7 +185,10 @@ export default function ClaimsPage() {
                   <div className="small text-muted claim-meta mb-2">
                     Status: {c?.status || "N/A"} · Payout: ₹{Number(c?.payout_amount ?? c?.payoutAmount ?? 0).toFixed(0)}
                   </div>
-                  <div className="small text-muted claim-meta mb-2">Trigger: {(c.triggerType || "weather").toUpperCase()}</div>
+                  <div className="small text-muted claim-meta mb-2">Trigger: {triggerLabel(c)}</div>
+                  {c?.fraud_reason ? (
+                    <div className="small text-muted claim-meta mb-2">Fraud reason: {c.fraud_reason}</div>
+                  ) : null}
                   <ClaimTimeline claim={c} />
                 </div>
               </div>

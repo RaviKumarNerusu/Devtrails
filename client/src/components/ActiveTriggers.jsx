@@ -5,7 +5,12 @@ const LABELS = {
   time: "Time ⏱️",
   location: "Location 📍",
   event: "Event ⚡",
-  claim: "Claim 🤖"
+  claim: "Claim 🤖",
+  rain: "Rain 🌧️",
+  heat: "Heat 🔥",
+  pollution: "Pollution 🌫️",
+  flood: "Flood 🌊",
+  social: "Social 🚨"
 };
 
 export default function ActiveTriggers({ triggers = [] }) {
