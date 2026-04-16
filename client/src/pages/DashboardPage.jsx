@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../services/apiClient.js";
 import { getWeather } from "../services/weatherService.js";
 import { getTriggerStatus } from "../services/policyService.js";
-import { getDashboardSummary } from "../services/dashboardService.js";
+import { getDashboardSummary, getInsurerAnalytics } from "../services/dashboardService.js";
 import WeatherCards from "../components/WeatherCards.jsx";
 import TemperatureChart from "../components/TemperatureChart.jsx";
 import CompensationChart from "../components/CompensationChart.jsx";
@@ -105,6 +105,25 @@ function formatRoleLabel(role) {
 
 const RAIN_CHECK_CITIES = ["Feni", "Dhaka", "Chattogram", "Sylhet", "Khulna", "Barishal"];
 
+function buildFallbackInsurerPreview(summary, policyInfo, recentClaims, claimSummary) {
+  const weeklyPremium = Number(summary?.policy?.weekly_premium ?? policyInfo?.weeklyPremium ?? 0);
+  const sampledPayout = (recentClaims || []).reduce(
+    (sum, claim) => sum + Number(claim?.payoutAmount ?? claim?.payout_amount ?? claim?.amount ?? 0),
+    0
+  );
+  const estimatedPayout = sampledPayout + Number(summary?.todayComp?.payoutAmount || 0);
+  const lossRatio = weeklyPremium > 0 ? estimatedPayout / weeklyPremium : 0;
+
+  return {
+    source: "preview",
+    lossRatio,
+    next_week_risk: Number(summary?.next_week_risk ?? policyInfo?.nextWeekRisk ?? 0),
+    avg_risk: Number(summary?.avg_risk ?? policyInfo?.avgRisk ?? 0),
+    totalClaims: Number(claimSummary?.total || 0),
+    approvedClaims: Number(claimSummary?.paid || 0)
+  };
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [city, setCity] = useState("");
@@ -140,6 +159,8 @@ export default function DashboardPage() {
   const [rainCitySignals, setRainCitySignals] = useState([]);
   const [rainCityLoading, setRainCityLoading] = useState(false);
   const [rainCityError, setRainCityError] = useState("");
+  const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
+  const [insurerPreview, setInsurerPreview] = useState(null);
   const cityMenuCloseTimerRef = useRef(null);
   const citySuggestionItemRefs = useRef([]);
   const hasRiskScore = policyInfo?.riskScore !== null && policyInfo?.riskScore !== undefined;
@@ -238,6 +259,7 @@ export default function DashboardPage() {
   const loadDashboardSummary = async () => {
     try {
       const summary = (await getDashboardSummary()) || {};
+      setDashboardSnapshot(summary);
 
       setTodayComp(summary.todayComp || {
         hasPolicy: summary.hasPolicy,
@@ -275,6 +297,28 @@ export default function DashboardPage() {
         setTodayClaim(null);
         setClaimSummary({ total: 0, paid: 0 });
         setRecentClaims([]);
+      }
+
+      try {
+        const role = String(user?.role || "").toLowerCase();
+        if (role === "insurer" || role === "admin") {
+          const analytics = await getInsurerAnalytics();
+          if (analytics) {
+            setInsurerPreview({ ...analytics, source: "admin" });
+          }
+        } else {
+          setInsurerPreview(buildFallbackInsurerPreview(summary, {
+            weeklyPremium: summary?.policy?.weekly_premium ?? summary?.policy?.weeklyPremium ?? 0,
+            nextWeekRisk: summary?.next_week_risk ?? 0,
+            avgRisk: summary?.avg_risk ?? 0
+          }, Array.isArray(summary?.recentClaims) ? summary.recentClaims : [], summary?.claimSummary || { total: 0, paid: 0 }));
+        }
+      } catch {
+        setInsurerPreview(buildFallbackInsurerPreview(summary, {
+          weeklyPremium: summary?.policy?.weekly_premium ?? summary?.policy?.weeklyPremium ?? 0,
+          nextWeekRisk: summary?.next_week_risk ?? 0,
+          avgRisk: summary?.avg_risk ?? 0
+        }, Array.isArray(summary?.recentClaims) ? summary.recentClaims : [], summary?.claimSummary || { total: 0, paid: 0 }));
       }
     } catch {
       setTodayComp(null);
@@ -584,6 +628,50 @@ export default function DashboardPage() {
             </div>
           </div>
         ) : null}
+        <div className="card card-glass shadow-sm mb-3">
+          <div className="card-body">
+            <h5 className="card-title mb-3">Intelligent Dashboard</h5>
+            <div className="row g-3 small">
+              <div className="col-md-6">
+                <div className="border rounded p-3 h-100">
+                  <div className="fw-semibold mb-2">For Workers</div>
+                  <div className="text-muted">Earnings protected, active weekly coverage.</div>
+                  <div className="mt-2 d-flex justify-content-between">
+                    <span className="text-muted">Weekly coverage</span>
+                    <span className="fw-semibold">
+                      {policyInfo?.isActive ? `₹${Number(policyInfo?.weeklyPremium || 0).toFixed(0)}` : "Inactive"}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span className="text-muted">Claim status</span>
+                    <span className="fw-semibold">{claimStatusLabel(todayClaim)}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="col-md-6">
+                <div className="border rounded p-3 h-100">
+                  <div className="fw-semibold mb-2 d-flex justify-content-between align-items-center">
+                    <span>For Insurers (Admin)</span>
+                    {insurerPreview?.source !== "admin" ? <span className="badge text-bg-secondary">Preview</span> : null}
+                  </div>
+                  <div className="text-muted">Loss ratios and predictive analytics on next week weather/disruption claims.</div>
+                  <div className="mt-2 d-flex justify-content-between">
+                    <span className="text-muted">Loss ratio</span>
+                    <span className="fw-semibold">{Number(insurerPreview?.lossRatio || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span className="text-muted">Next week risk</span>
+                    <span className="fw-semibold">{formatRisk(insurerPreview?.next_week_risk ?? dashboardSnapshot?.next_week_risk ?? 0)}</span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span className="text-muted">Claims tracked</span>
+                    <span className="fw-semibold">{Number(insurerPreview?.totalClaims || claimSummary?.total || 0)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="card card-glass shadow-sm mb-3">
           <div className="card-body">
             <div className="small text-muted mb-2">Active automation triggers</div>
