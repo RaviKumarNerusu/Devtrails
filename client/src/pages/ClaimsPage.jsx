@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { autoCreateClaim, getMyClaims, redeemClaimNow } from "../services/claimService.js";
+import { autoCreateClaim, getAllClaims, getMyClaims, redeemClaimNow } from "../services/claimService.js";
 import { getPolicyByUserId } from "../services/policyService.js";
 import { useAuth } from "../authContext.jsx";
 import ClaimTimeline from "../components/ClaimTimeline.jsx";
@@ -20,6 +20,8 @@ function triggerLabel(claim) {
 
 export default function ClaimsPage() {
   const { user } = useAuth();
+  const role = String(user?.role || "").toLowerCase();
+  const isAdminView = role === "admin" || role === "insurer";
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -29,6 +31,11 @@ export default function ClaimsPage() {
 
   const loadClaims = async (isPolicyActive) => {
     try {
+      if (isAdminView) {
+        const result = await getAllClaims({ page: 1, limit: 100 });
+        setClaims(result.claims || []);
+        return;
+      }
       if (isPolicyActive) {
         // Ensure today's claim record exists only for users with active policy.
         await autoCreateClaim();
@@ -41,6 +48,10 @@ export default function ClaimsPage() {
   };
 
   const loadPolicy = async () => {
+    if (isAdminView) {
+      setPolicyActive(true);
+      return true;
+    }
     if (!user?.id) return;
     try {
       const policy = await getPolicyByUserId(user.id);
@@ -64,7 +75,7 @@ export default function ClaimsPage() {
         setLoading(false);
       }
     })();
-  }, [user?.id]);
+  }, [user?.id, isAdminView]);
 
   const handleCheckEligibility = async () => {
     setChecking(true);
@@ -124,18 +135,50 @@ export default function ClaimsPage() {
 
   if (loading) return <div>Loading claims...</div>;
 
+  const totalClaims = claims.length;
+  const approvedClaims = claims.filter((c) => String(c.status || "").toLowerCase() === "approved").length;
+  const pendingReviewClaims = claims.filter((c) => Boolean(c.requiresAdminReview)).length;
+  const totalPayout = claims.reduce((sum, c) => sum + Number(c?.payout_amount ?? c?.payoutAmount ?? c?.amount ?? 0), 0);
+
   return (
     <div className="claims-page">
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="mb-0">Claims</h2>
-        <button className="btn btn-outline-primary" onClick={handleCheckEligibility} disabled={checking || !policyActive}>
-          {checking ? "Checking..." : "Check eligibility"}
-        </button>
+        <h2 className="mb-0">{isAdminView ? "Claims Control Center" : "Claims"}</h2>
+        {isAdminView ? null : (
+          <button className="btn btn-outline-primary" onClick={handleCheckEligibility} disabled={checking || !policyActive}>
+            {checking ? "Checking..." : "Check eligibility"}
+          </button>
+        )}
       </div>
 
       {error ? <div className="alert alert-danger">{error}</div> : null}
 
-      {!policyActive ? (
+      {isAdminView ? (
+        <div className="card card-glass shadow-sm mb-3">
+          <div className="card-body">
+            <div className="row g-3 small">
+              <div className="col-md-3">
+                <div className="text-muted">Total claims</div>
+                <div className="fw-semibold fs-5">{totalClaims}</div>
+              </div>
+              <div className="col-md-3">
+                <div className="text-muted">Approved</div>
+                <div className="fw-semibold fs-5">{approvedClaims}</div>
+              </div>
+              <div className="col-md-3">
+                <div className="text-muted">Requires review</div>
+                <div className="fw-semibold fs-5">{pendingReviewClaims}</div>
+              </div>
+              <div className="col-md-3">
+                <div className="text-muted">Total payout</div>
+                <div className="fw-semibold fs-5">₹{Number(totalPayout).toFixed(0)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!isAdminView && !policyActive ? (
         <div className="alert alert-warning d-flex justify-content-between align-items-center" role="alert">
           <div>
             <div className="fw-semibold">No Active Policy</div>
@@ -147,7 +190,7 @@ export default function ClaimsPage() {
         </div>
       ) : null}
 
-      {policyActive && eligibleClaim ? (
+      {!isAdminView && policyActive && eligibleClaim ? (
         <div className="alert alert-success d-flex justify-content-between align-items-center" role="alert">
           <div>
             <div className="fw-semibold">Claim Available!</div>
@@ -159,7 +202,7 @@ export default function ClaimsPage() {
             {redeeming ? "Claiming..." : "Claim Now"}
           </button>
         </div>
-      ) : policyActive ? (
+      ) : !isAdminView && policyActive ? (
         <div className="alert alert-secondary claims-neutral-alert" role="alert">
           Not Eligible Today
         </div>
@@ -188,6 +231,9 @@ export default function ClaimsPage() {
                     Status: {c?.status || "N/A"} · Payout: ₹{Number(c?.payout_amount ?? c?.payoutAmount ?? 0).toFixed(0)}
                   </div>
                   <div className="small text-muted claim-meta mb-2">Trigger: {triggerLabel(c)}</div>
+                  {isAdminView ? (
+                    <div className="small text-muted claim-meta mb-2">Review Required: {c?.requiresAdminReview ? "Yes" : "No"}</div>
+                  ) : null}
                   {c?.fraud_reason ? (
                     <div className="small text-muted claim-meta mb-2">Fraud reason: {c.fraud_reason}</div>
                   ) : null}

@@ -58,8 +58,66 @@ async function getMyTickets(req, res) {
   return sendSuccess(res, { items: tickets }, "Tickets fetched");
 }
 
+async function getAllTickets(req, res) {
+  const userId = req.user?._id;
+  if (!userId) {
+    res.status(401);
+    throw new Error("Not authorized");
+  }
+
+  const status = String(req.query?.status || "").toLowerCase().trim();
+  const filter = {};
+  if (["pending", "resolved"].includes(status)) {
+    filter.status = status;
+  }
+
+  const tickets = await SupportTicket.find(filter)
+    .populate("userId", "name email role")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return sendSuccess(res, { items: tickets }, "All tickets fetched");
+}
+
+async function updateTicketStatus(req, res) {
+  const userId = req.user?._id;
+  if (!userId) {
+    res.status(401);
+    throw new Error("Not authorized");
+  }
+
+  const ticketId = String(req.params?.ticketId || "").trim();
+  if (!ticketId) {
+    res.status(400);
+    throw new Error("ticketId is required");
+  }
+
+  const status = String(req.body?.status || "").toLowerCase().trim();
+  if (!["pending", "resolved"].includes(status)) {
+    res.status(400);
+    throw new Error("Invalid status");
+  }
+
+  const updated = await SupportTicket.findByIdAndUpdate(
+    ticketId,
+    { $set: { status } },
+    { new: true, runValidators: true }
+  )
+    .populate("userId", "name email role")
+    .lean();
+
+  if (!updated) {
+    res.status(404);
+    throw new Error("Ticket not found");
+  }
+
+  return sendSuccess(res, { ticket: updated }, "Ticket status updated");
+}
+
 module.exports = {
   createTicket: asyncHandler(createTicket),
-  getMyTickets: asyncHandler(getMyTickets)
+  getMyTickets: asyncHandler(getMyTickets),
+  getAllTickets: asyncHandler(getAllTickets),
+  updateTicketStatus: asyncHandler(updateTicketStatus)
 };
 

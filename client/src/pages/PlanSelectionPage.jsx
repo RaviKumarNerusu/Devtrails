@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../authContext.jsx";
 
 const PLANS = [
   {
@@ -26,9 +27,29 @@ const PLANS = [
 ];
 
 export default function PlanSelectionPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [loadingPlanId, setLoadingPlanId] = React.useState("");
   const [error, setError] = React.useState("");
+  const role = String(user?.role || "").toLowerCase();
+  const isAdminView = role === "admin" || role === "insurer";
+
+  if (isAdminView) {
+    return (
+      <div className="card card-glass shadow-sm">
+        <div className="card-body">
+          <h2 className="mb-2">Admin account detected</h2>
+          <p className="text-muted mb-3">
+            Plan purchase is a partner flow. As admin, use analytics and claims control panels for platform oversight.
+          </p>
+          <div className="d-flex gap-2">
+            <button className="btn btn-primary" onClick={() => navigate("/analytics")}>Go to Analytics</button>
+            <button className="btn btn-outline-secondary" onClick={() => navigate("/claims")}>Open Claims Control</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleSelect = async (planId) => {
     setError("");

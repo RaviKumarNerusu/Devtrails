@@ -28,6 +28,8 @@ function PrivateRoute({ children }) {
 function Shell() {
   const { user, logout } = useAuth();
   const [dark, setDark] = useState(false);
+  const role = String(user?.role || "").toLowerCase();
+  const isAdminView = role === "admin" || role === "insurer";
 
   return (
     <div className={`ig-app ${dark ? "bg-dark text-light" : "bg-light text-dark"} min-vh-100`}>
@@ -68,17 +70,19 @@ function Shell() {
                   </li>
                   <li className="nav-item">
                     <Link to="/analytics" className="nav-link">
-                      Analytics
+                      {isAdminView ? "Admin Analytics" : "Analytics"}
                     </Link>
                   </li>
-                  <li className="nav-item">
-                    <Link to="/claim-history" className="nav-link">
-                      Claim History
-                    </Link>
-                  </li>
+                  {!isAdminView ? (
+                    <li className="nav-item">
+                      <Link to="/claim-history" className="nav-link">
+                        Claim History
+                      </Link>
+                    </li>
+                  ) : null}
                   <li className="nav-item">
                     <Link to="/support" className="nav-link">
-                      Support
+                      {isAdminView ? "Support Control" : "Support"}
                     </Link>
                   </li>
                   <li className="nav-item">
@@ -88,7 +92,7 @@ function Shell() {
                   </li>
                   <li className="nav-item">
                     <Link to="/claims" className="nav-link">
-                      Claims
+                      {isAdminView ? "Claims Control" : "Claims"}
                     </Link>
                   </li>
                 </>

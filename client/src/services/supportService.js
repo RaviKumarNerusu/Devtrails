@@ -17,3 +17,15 @@ export async function getMySupportTickets() {
   return data?.items || [];
 }
 
+export async function getAllSupportTickets(status = "") {
+  const params = {};
+  if (status) params.status = status;
+  const { data } = await api.get("/support/all", { params });
+  return data?.items || [];
+}
+
+export async function updateSupportTicketStatus(ticketId, status) {
+  const { data } = await api.patch(`/support/${ticketId}/status`, { status });
+  return data?.ticket || null;
+}
+

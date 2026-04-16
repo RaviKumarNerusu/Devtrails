@@ -32,6 +32,15 @@ export async function getMyClaims() {
   return claims;
 }
 
+export async function getAllClaims(params = {}) {
+  const { data } = await api.get("/claim/all", { headers: authHeaders(), params });
+  const claims = Array.isArray(data?.claims) ? data.claims.map(normalizeClaim) : [];
+  return {
+    claims,
+    pagination: data?.pagination || null
+  };
+}
+
 export async function redeemClaimNow(claimId = null) {
   const payload = claimId ? { claimId } : {};
   const { data } = await api.post("/claim/redeem", payload, { headers: authHeaders() });
