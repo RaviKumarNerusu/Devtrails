@@ -17,6 +17,15 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setUser(null);
+    };
+
+    window.addEventListener("auth:expired", handleAuthExpired);
+    return () => window.removeEventListener("auth:expired", handleAuthExpired);
+  }, []);
+
   const login = (userData, token) => {
     setUser(userData);
     localStorage.setItem("auth_user", JSON.stringify(userData));

@@ -38,10 +38,20 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    const status = error.response?.status;
+
+    if (status === 401) {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("auth_user");
+      window.dispatchEvent(new Event("auth:expired"));
+    }
+
     const normalizedError = new Error(
-      error.response?.data?.message || error.message || "Request failed"
+      status === 401
+        ? "Session expired. Please login again."
+        : error.response?.data?.message || error.message || "Request failed"
     );
-    normalizedError.status = error.response?.status;
+    normalizedError.status = status;
     normalizedError.response = error.response;
     normalizedError.raw = error;
     throw normalizedError;

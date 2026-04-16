@@ -12,6 +12,7 @@ export default function PaymentPage() {
   const navigate = useNavigate();
   const selectedPlanId = localStorage.getItem("selected_plan_id") || "standard";
   const [scriptReady, setScriptReady] = React.useState(false);
+  const [sessionExpired, setSessionExpired] = React.useState(false);
 
   const selectedPlan = useMemo(
     () => PLAN_LOOKUP[selectedPlanId] || PLAN_LOOKUP.standard,
@@ -20,6 +21,16 @@ export default function PaymentPage() {
 
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState("");
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setSessionExpired(true);
+      setError("Session expired. Please login again.");
+    };
+
+    window.addEventListener("auth:expired", handleAuthExpired);
+    return () => window.removeEventListener("auth:expired", handleAuthExpired);
+  }, []);
 
   useEffect(() => {
     if (window.Razorpay) {
@@ -111,6 +122,21 @@ export default function PaymentPage() {
       setSubmitting(false);
     }
   };
+
+  if (sessionExpired) {
+    return (
+      <div className="row justify-content-center">
+        <div className="col-lg-6">
+          <div className="alert alert-warning" role="alert">
+            Your session expired. Please login again and retry the payment.
+          </div>
+          <Link to="/login" className="btn btn-primary">
+            Go to login
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="row justify-content-center">
