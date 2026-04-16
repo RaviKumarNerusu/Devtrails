@@ -41,22 +41,6 @@ export default function PaymentPage() {
     };
   }, []);
 
-  const activatePlan = async () => {
-    const validTill = Date.now() + 7 * 24 * 60 * 60 * 1000;
-    await api.post("/plan/activate", { name: selectedPlan.name, validTill });
-
-    localStorage.setItem(
-      "activePlan",
-      JSON.stringify({
-        name: selectedPlan.name,
-        validTill,
-        status: "active"
-      })
-    );
-
-    navigate("/app");
-  };
-
   const handleRazorpayPayment = async (e) => {
     e.preventDefault();
     setError("");
@@ -92,12 +76,27 @@ export default function PaymentPage() {
           contact: "9999999999"
         },
         handler: async (response) => {
-          await api.post("/payment/razorpay/verify", {
+          const verification = await api.post("/payment/razorpay/verify", {
             razorpay_order_id: response.razorpay_order_id,
             razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_signature: response.razorpay_signature
+            razorpay_signature: response.razorpay_signature,
+            planId: selectedPlanId,
+            planName: selectedPlan.name
           });
-          await activatePlan();
+
+          if (verification?.data?.policy?.isActive) {
+            const validTill = Date.now() + 7 * 24 * 60 * 60 * 1000;
+            localStorage.setItem(
+              "activePlan",
+              JSON.stringify({
+                name: selectedPlan.name,
+                validTill,
+                status: "active"
+              })
+            );
+          }
+
+          navigate("/app");
         }
       });
 
@@ -135,9 +134,9 @@ export default function PaymentPage() {
         </div>
         <form onSubmit={handleRazorpayPayment}>
           <div className="mb-3">
-            <label className="form-label">Test mode</label>
+            <label className="form-label">Secure checkout</label>
             <input className="form-control" value="Razorpay checkout opens on submit" disabled readOnly />
-            <div className="form-text">Use the test bank account or test card details inside the Razorpay popup.</div>
+            <div className="form-text">Use the Razorpay test bank account or test card inside the checkout popup.</div>
           </div>
           <button type="submit" className="btn btn-success w-100" disabled={submitting || !scriptReady}>
             {submitting ? "Processing..." : scriptReady ? "Pay with Razorpay" : "Loading payment..."}
