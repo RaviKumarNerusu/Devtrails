@@ -98,6 +98,13 @@ function formatRisk(value) {
   return numberValue.toFixed(2);
 }
 
+function formatRoleLabel(role) {
+  const value = String(role || "partner").trim().toLowerCase();
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+const RAIN_CHECK_CITIES = ["Feni", "Dhaka", "Chattogram", "Sylhet", "Khulna", "Barishal"];
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [city, setCity] = useState("");
@@ -130,6 +137,9 @@ export default function DashboardPage() {
   const [isProfileCityMenuOpen, setIsProfileCityMenuOpen] = useState(false);
   const [activeCitySuggestionIndex, setActiveCitySuggestionIndex] = useState(-1);
   const [cityAutoHint, setCityAutoHint] = useState("");
+  const [rainCitySignals, setRainCitySignals] = useState([]);
+  const [rainCityLoading, setRainCityLoading] = useState(false);
+  const [rainCityError, setRainCityError] = useState("");
   const cityMenuCloseTimerRef = useRef(null);
   const citySuggestionItemRefs = useRef([]);
   const hasRiskScore = policyInfo?.riskScore !== null && policyInfo?.riskScore !== undefined;
@@ -294,12 +304,59 @@ export default function DashboardPage() {
     }
   };
 
+  const loadRainCitySignals = async (thresholdOverride = null) => {
+    const threshold = Number(thresholdOverride ?? profile?.rainThresholdMm ?? 15) || 15;
+    setRainCityLoading(true);
+    setRainCityError("");
+
+    try {
+      const results = await Promise.all(
+        RAIN_CHECK_CITIES.map(async (cityName) => {
+          try {
+            const { data } = await api.post("/policy/premium/calculate", {
+              location: cityName,
+              threshold
+            });
+
+            const weatherSnapshot = data?.weather || {};
+            const rainMm = Number(weatherSnapshot?.rainMm || 0);
+
+            return {
+              city: cityName,
+              rainMm: Number.isFinite(rainMm) ? rainMm : 0,
+              condition: String(weatherSnapshot?.condition || "Unknown"),
+              threshold,
+              eligible: Number.isFinite(rainMm) ? rainMm > threshold : false
+            };
+          } catch {
+            return {
+              city: cityName,
+              rainMm: 0,
+              condition: "Unavailable",
+              threshold,
+              eligible: false,
+              unavailable: true
+            };
+          }
+        })
+      );
+
+      results.sort((a, b) => b.rainMm - a.rainMm);
+      setRainCitySignals(results);
+    } catch (err) {
+      setRainCityError(err?.response?.data?.message || err.message || "Failed to load rain city checker");
+    } finally {
+      setRainCityLoading(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       await Promise.all([loadHistory(), loadFavorites()]);
       const partnerCity = await loadProfile();
       await loadPayoutHistory(partnerCity);
       await loadPolicyAndClaims();
+      await loadRainCitySignals();
       if (partnerCity) {
         await performSearch(partnerCity, { skipMetaRefresh: true });
       }
@@ -721,6 +778,33 @@ export default function DashboardPage() {
       </div>
       <div className="col-lg-4">
         <div className="mb-3">
+          <h5>Profile Structure</h5>
+          <div className="card card-glass shadow-sm">
+            <div className="card-body small">
+              <div className="d-flex justify-content-between mb-1">
+                <span className="text-muted">Name</span>
+                <span className="fw-semibold">{user?.name || "--"}</span>
+              </div>
+              <div className="d-flex justify-content-between mb-1">
+                <span className="text-muted">Email</span>
+                <span className="fw-semibold text-break">{user?.email || "--"}</span>
+              </div>
+              <div className="d-flex justify-content-between mb-1">
+                <span className="text-muted">Role</span>
+                <span className="fw-semibold">{formatRoleLabel(user?.role)}</span>
+              </div>
+              <div className="d-flex justify-content-between mb-1">
+                <span className="text-muted">Profile city</span>
+                <span className="fw-semibold">{profile?.city || "--"}</span>
+              </div>
+              <div className="d-flex justify-content-between">
+                <span className="text-muted">Pincode</span>
+                <span className="fw-semibold">{profile?.pincode || "--"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mb-3">
           <h5>Partner Settings</h5>
           <div className="card card-glass shadow-sm mb-3">
             <div className="card-body">
@@ -752,6 +836,7 @@ export default function DashboardPage() {
                     await loadProfile();
                     await loadDashboardSummary();
                     await loadPayoutHistory(profile.city || "");
+                    await loadRainCitySignals(Number(profile.rainThresholdMm) || 15);
                     if (profile.city) {
                       await performSearch(profile.city, { fromAuto: true });
                     }
@@ -846,6 +931,46 @@ export default function DashboardPage() {
                 {profileSaveMessage ? <div className="text-success small mt-2">{profileSaveMessage}</div> : null}
                 {profileSaveError ? <div className="text-danger small mt-2">{profileSaveError}</div> : null}
               </form>
+            </div>
+          </div>
+        </div>
+        <div className="mb-3">
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <h5 className="mb-0">Rain City Checker</h5>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-primary"
+              onClick={() => loadRainCitySignals()}
+              disabled={rainCityLoading}
+            >
+              {rainCityLoading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+          <div className="card card-glass shadow-sm">
+            <div className="card-body">
+              <div className="small text-muted mb-2">
+                Claim threshold reference: <strong>{Number(profile?.rainThresholdMm || 15)} mm</strong>
+              </div>
+              {rainCityError ? <div className="alert alert-danger small mb-2">{rainCityError}</div> : null}
+              <div className="list-group small">
+                {rainCitySignals.length === 0 ? <div className="text-muted">No rain snapshots yet.</div> : null}
+                {rainCitySignals.map((item) => (
+                  <button
+                    key={item.city}
+                    type="button"
+                    className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                    onClick={() => performSearch(item.city)}
+                  >
+                    <span>
+                      {item.city}
+                      <span className="text-muted ms-2">{item.condition}</span>
+                    </span>
+                    <span className={`badge ${item.eligible ? "text-bg-success" : "text-bg-secondary"}`}>
+                      {item.rainMm.toFixed(1)} mm
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
