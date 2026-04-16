@@ -385,8 +385,11 @@ export default function DashboardPage() {
         })
       );
 
-      results.sort((a, b) => b.rainMm - a.rainMm);
-      setRainCitySignals(results);
+      const rainyOnly = results
+        .filter((item) => !item.unavailable && Number(item.rainMm) > 0)
+        .sort((a, b) => b.rainMm - a.rainMm);
+
+      setRainCitySignals(rainyOnly);
     } catch (err) {
       setRainCityError(err?.response?.data?.message || err.message || "Failed to load rain city checker");
     } finally {
@@ -1041,7 +1044,7 @@ export default function DashboardPage() {
               </div>
               {rainCityError ? <div className="alert alert-danger small mb-2">{rainCityError}</div> : null}
               <div className="list-group small">
-                {rainCitySignals.length === 0 ? <div className="text-muted">No rain snapshots yet.</div> : null}
+                {rainCitySignals.length === 0 ? <div className="text-muted">No rain cities right now.</div> : null}
                 {rainCitySignals.map((item) => (
                   <button
                     key={item.city}
