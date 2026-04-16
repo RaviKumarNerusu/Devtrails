@@ -74,8 +74,8 @@ async function getOrCreatePartnerProfile(user) {
 function calculateDynamicPayout(rainMm, threshold, baseAmount) {
   if (!baseAmount || baseAmount <= 0) return 0;
 
-  // Only payout if rain >= threshold (strict claim logic)
-  if (rainMm < threshold) {
+  // Only payout if rain is strictly above the threshold.
+  if (rainMm <= threshold) {
     return 0;
   }
 
@@ -91,6 +91,35 @@ function calculateDynamicPayout(rainMm, threshold, baseAmount) {
   }
 
   return 0;
+}
+
+function calculateTriggeredPayout({
+  triggerType,
+  rainMm,
+  rainThreshold,
+  floodThreshold,
+  temperature,
+  heatThreshold,
+  aqi,
+  pollutionThreshold,
+  socialEvent,
+  baseAmount
+}) {
+  if (!baseAmount || baseAmount <= 0) return 0;
+
+  switch (triggerType) {
+    case "heat":
+      return temperature > heatThreshold ? baseAmount : 0;
+    case "pollution":
+      return aqi > pollutionThreshold ? baseAmount : 0;
+    case "flood":
+      return calculateDynamicPayout(rainMm, floodThreshold, baseAmount);
+    case "social":
+      return socialEvent?.active ? baseAmount : 0;
+    case "rain":
+    default:
+      return calculateDynamicPayout(rainMm, rainThreshold, baseAmount);
+  }
 }
 
 /**
@@ -202,6 +231,9 @@ async function runAutomationForUser(user) {
     location: city,
     activityDrop: false
   });
+  const triggerType = triggerResult.triggerType || "rain";
+  const triggerThresholds = triggerResult.weatherData?.thresholds || {};
+  const triggerSocialEvent = triggerResult.weatherData?.socialEvent || null;
 
   const premiumBase = calculatePremium(user, weather, { location: city });
   const computedPremium = Math.max(20, premiumBase.premium + triggerResult.premiumDelta);
@@ -221,9 +253,39 @@ async function runAutomationForUser(user) {
 
   // ========== STEP 6: CLAIM LIFECYCLE (ALWAYS UPSERT ONE DAILY RECORD) ==========
   const todayComp = await buildTodayCompensation(user);
-  const eligible = rainMm >= threshold;
+  const floodThreshold = Number(triggerThresholds.flood_threshold || Math.max(threshold * 1.5, threshold + 10));
+  const heatThreshold = Number(triggerThresholds.heat_threshold || weather.heatThreshold || process.env.TRIGGER_HEAT_THRESHOLD || 35);
+  const pollutionThreshold = Number(triggerThresholds.pollution_threshold || process.env.TRIGGER_AQI_THRESHOLD || 150);
+  const eligible = (() => {
+    switch (triggerType) {
+      case "heat":
+        return temperature > heatThreshold;
+      case "pollution":
+        return aqi > pollutionThreshold;
+      case "flood":
+        return rainMm > floodThreshold;
+      case "social":
+        return Boolean(triggerSocialEvent?.active);
+      case "rain":
+      default:
+        return rainMm > threshold;
+    }
+  })();
   const basePayout = todayComp.payoutAmount || 0;
-  const tieredPayout = eligible ? calculateDynamicPayout(rainMm, threshold, basePayout) : 0;
+  const tieredPayout = eligible
+    ? calculateTriggeredPayout({
+        triggerType,
+        rainMm,
+        rainThreshold: threshold,
+        floodThreshold,
+        temperature,
+        heatThreshold,
+        aqi,
+        pollutionThreshold,
+        socialEvent: triggerSocialEvent,
+        baseAmount: basePayout
+      })
+    : 0;
   const cappedPayout = Math.min(tieredPayout, CLAIM_CONFIG.MAX_PAYOUT_AMOUNT);
 
   const claim = await upsertDailyClaimRecord({
@@ -237,7 +299,7 @@ async function runAutomationForUser(user) {
     payoutAmount: cappedPayout,
     maxPayoutAmount: CLAIM_CONFIG.MAX_PAYOUT_AMOUNT,
     autoTriggered: true,
-    triggerType: "weather"
+    triggerType
   });
 
   if (eligible) {
@@ -277,6 +339,7 @@ async function runAutomationForUser(user) {
       condition: currentWeather?.weather?.[0]?.main || "Unknown"
     },
     triggers: triggerResult.triggers,
+    legacyTriggers: triggerResult.legacyTriggers,
     claim,
     claimDecision: claim?.status || (eligible ? "ELIGIBLE" : "NO_CLAIM"),
     fraudChecks: {

@@ -137,7 +137,7 @@ async function getFraudScore({
   threshold = 0,
   triggeredByWeather = true,
   isAutoTriggered = false,
-  triggerType = "weather",
+  triggerType = "rain",
   temperature = 0,
   heatThreshold = 40,
   aqi = 0,
@@ -186,6 +186,7 @@ async function getFraudScore({
     claims24h: fraudSignals.claims24h,
     claims7d: fraudSignals.claims7d,
     triggerType,
+    trigger_type: normalizeTriggerType(triggerType),
     reasons,
     weatherData
   });

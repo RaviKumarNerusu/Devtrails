@@ -206,7 +206,7 @@ async function upsertDailyClaimRecord({
   payoutAmount,
   maxPayoutAmount,
   autoTriggered = true,
-  triggerType = "weather",
+  triggerType = "rain",
   riskScore = 0,
   fraudScore = 0,
   mlFactors = {},
@@ -419,7 +419,7 @@ async function evaluateClaimEligibility(user, options = {}) {
     payoutAmount: 0,
     maxPayoutAmount: 0,
     autoTriggered: true,
-    triggerType: options?.triggerType || "weather",
+    triggerType: options?.triggerType || "rain",
     riskScore,
     fraudScore: fraudResult.fraud_score,
     fraudReason: fraudResult.fraud_reason,
@@ -443,6 +443,7 @@ async function evaluateClaimEligibility(user, options = {}) {
     confidence: confidence.confidence_score,
     status: claim?.status || null,
     decisionReason: confidence.decision_reason,
+    trigger_type: claim?.trigger_type || triggerContext.trigger_type,
     modelVersion
   });
 
@@ -450,7 +451,8 @@ async function evaluateClaimEligibility(user, options = {}) {
     userId: user._id.toString(),
     fraudScore: fraudResult.fraud_score,
     shouldReject: fraudResult.should_reject,
-    reasons: fraudResult.reasons
+    reasons: fraudResult.reasons,
+    trigger_type: triggerContext.trigger_type
   });
 
   logger.info("Claim eligibility evaluated", {
@@ -459,7 +461,8 @@ async function evaluateClaimEligibility(user, options = {}) {
     rain: rainMm,
     threshold,
     decision: eligible ? "ELIGIBLE" : "NOT_ELIGIBLE",
-    status: claim?.status || "none"
+    status: claim?.status || "none",
+    trigger_type: triggerContext.trigger_type
   });
 
   return {
@@ -606,7 +609,7 @@ async function redeemEligibleClaim(user, claimId = null) {
   return approvedClaim;
 }
 
-async function createAutoTriggeredClaim(user, triggerType = "weather", options = {}) {
+async function createAutoTriggeredClaim(user, triggerType = "rain", options = {}) {
   const normalizedTriggerType = normalizeTriggerType(triggerType);
   const result = await evaluateClaimEligibility(user, {
     ...options,
@@ -636,6 +639,7 @@ async function createAutoTriggeredClaim(user, triggerType = "weather", options =
   logger.info("Auto claim processed", {
     userId: user._id.toString(),
     triggerType: normalizedTriggerType,
+    trigger_type: normalizedTriggerType,
     claimStatus: result.claim.status,
     payoutAmount: result.claim.payoutAmount,
     riskScore: result.claim.risk_score,

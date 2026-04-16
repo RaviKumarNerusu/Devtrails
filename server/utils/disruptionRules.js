@@ -1,4 +1,11 @@
 const SOCIAL_EVENT_TYPES = ["curfew", "strike", "zone_closure"];
+const CANONICAL_TRIGGER_TYPES = ["rain", "heat", "pollution", "flood", "social"];
+const LEGACY_TRIGGER_ALIASES = {
+  weather: "rain",
+  event: "social",
+  location: "flood",
+  time: "heat"
+};
 
 function toNumber(value, fallback = 0) {
   const numberValue = Number(value);
@@ -8,10 +15,9 @@ function toNumber(value, fallback = 0) {
 function normalizeTriggerType(value) {
   const triggerType = String(value || "rain").toLowerCase();
 
-  if (triggerType === "weather") return "rain";
-  if (triggerType === "event") return "social";
+  if (LEGACY_TRIGGER_ALIASES[triggerType]) return LEGACY_TRIGGER_ALIASES[triggerType];
 
-  if (["rain", "heat", "pollution", "flood", "social"].includes(triggerType)) {
+  if (CANONICAL_TRIGGER_TYPES.includes(triggerType)) {
     return triggerType;
   }
 

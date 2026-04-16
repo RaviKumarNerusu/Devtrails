@@ -1,6 +1,6 @@
 const assert = require("assert");
 
-const { buildMockSocialEvent, resolveDisruptionTrigger } = require("../utils/disruptionRules");
+const { buildMockSocialEvent, normalizeTriggerType, resolveDisruptionTrigger } = require("../utils/disruptionRules");
 const { evaluateFraudSignals } = require("../services/fraudService");
 const { calculatePredictionMetrics } = require("../controllers/dashboardController");
 
@@ -14,6 +14,9 @@ function buildClaims(createdAtOffsetsHours, triggerType = "rain") {
 }
 
 function main() {
+  assert.strictEqual(normalizeTriggerType("weather"), "rain");
+  assert.strictEqual(normalizeTriggerType("event"), "social");
+
   const rainTrigger = resolveDisruptionTrigger({
     rainfall: 26,
     temperature: 31,

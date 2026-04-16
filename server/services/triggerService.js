@@ -43,14 +43,16 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
     thresholds,
     socialEvent
   });
+  const triggerType = disruption.trigger_type || null;
 
   const triggers = [];
+  const legacyTriggers = [];
 
-  triggers.push({ type: "rain", hit: disruption.trigger_type === "rain", premiumDelta: disruption.trigger_type === "rain" ? 20 : 0, claim: disruption.trigger_type === "rain" });
-  triggers.push({ type: "heat", hit: disruption.trigger_type === "heat", premiumDelta: disruption.trigger_type === "heat" ? 15 : 0, claim: disruption.trigger_type === "heat" });
-  triggers.push({ type: "pollution", hit: disruption.trigger_type === "pollution", premiumDelta: disruption.trigger_type === "pollution" ? 15 : 0, claim: disruption.trigger_type === "pollution" });
-  triggers.push({ type: "flood", hit: disruption.trigger_type === "flood", premiumDelta: disruption.trigger_type === "flood" ? 25 : 0, claim: disruption.trigger_type === "flood" });
-  triggers.push({ type: "social", hit: disruption.trigger_type === "social", premiumDelta: disruption.trigger_type === "social" ? 10 : 0, claim: disruption.trigger_type === "social" });
+  triggers.push({ type: "rain", hit: triggerType === "rain", premiumDelta: triggerType === "rain" ? 20 : 0, claim: triggerType === "rain" });
+  triggers.push({ type: "heat", hit: triggerType === "heat", premiumDelta: triggerType === "heat" ? 15 : 0, claim: triggerType === "heat" });
+  triggers.push({ type: "pollution", hit: triggerType === "pollution", premiumDelta: triggerType === "pollution" ? 15 : 0, claim: triggerType === "pollution" });
+  triggers.push({ type: "flood", hit: triggerType === "flood", premiumDelta: triggerType === "flood" ? 25 : 0, claim: triggerType === "flood" });
+  triggers.push({ type: "social", hit: triggerType === "social", premiumDelta: triggerType === "social" ? 10 : 0, claim: triggerType === "social" });
 
   // Preserve legacy trigger labels for older screens while the new disruption model is adopted.
   const now = new Date();
@@ -62,19 +64,21 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   );
   const userActivityDrop = activityDrop === true || Number(user?.safeDays || 0) <= 1;
 
-  triggers.push({ type: "weather", hit: disruption.trigger_type === "rain", premiumDelta: 20, claim: disruption.trigger_type === "rain" });
-  triggers.push({ type: "time", hit: disruption.trigger_type === "heat" || isNight, premiumDelta: disruption.trigger_type === "heat" ? 15 : isNight ? 10 : 0, claim: disruption.trigger_type === "heat" });
-  triggers.push({ type: "location", hit: highRiskZone, premiumDelta: highRiskZone ? 30 : 0, claim: false });
-  triggers.push({ type: "event", hit: disruption.trigger_type === "social" || userActivityDrop, premiumDelta: disruption.trigger_type === "social" ? 10 : userActivityDrop ? 10 : 0, claim: disruption.trigger_type === "social" || userActivityDrop });
+  legacyTriggers.push({ type: "weather", hit: triggerType === "rain", premiumDelta: triggerType === "rain" ? 20 : 0, claim: triggerType === "rain", trigger_type: triggerType });
+  legacyTriggers.push({ type: "time", hit: triggerType === "heat" || isNight, premiumDelta: triggerType === "heat" ? 15 : isNight ? 10 : 0, claim: triggerType === "heat", trigger_type: triggerType });
+  legacyTriggers.push({ type: "location", hit: highRiskZone, premiumDelta: highRiskZone ? 30 : 0, claim: false, trigger_type: triggerType });
+  legacyTriggers.push({ type: "event", hit: triggerType === "social" || userActivityDrop, premiumDelta: triggerType === "social" ? 10 : userActivityDrop ? 10 : 0, claim: triggerType === "social", trigger_type: triggerType });
 
-  const claimTrigger = Boolean(disruption.trigger_type) || highRiskZone || userActivityDrop;
-  triggers.push({ type: "claim", hit: claimTrigger, premiumDelta: 0, claim: claimTrigger });
+  const claimTrigger = Boolean(triggerType);
+  legacyTriggers.push({ type: "claim", hit: claimTrigger || highRiskZone || userActivityDrop, premiumDelta: 0, claim: claimTrigger, trigger_type: triggerType });
 
   return {
     triggers,
+    legacyTriggers,
     premiumDelta: triggers.reduce((sum, t) => sum + (t.premiumDelta || 0), 0),
     shouldCreateClaim: claimTrigger,
-    triggerType: disruption.trigger_type,
+    triggerType,
+    trigger_type: triggerType,
     weatherData: {
       rainfall: rainMm,
       temperature,
@@ -210,10 +214,14 @@ async function processHourlyParametricTriggers() {
         socialEvent
       });
 
-      console.log("Trigger Type:", triggerDecision.trigger_type);
-      console.log("Weather Data:", weatherData);
+      logger.info("Trigger evaluated", {
+        userId,
+        city,
+        trigger_type: triggerDecision.trigger_type,
+        weatherData
+      });
 
-      let triggerType = triggerDecision.trigger_type;
+      const triggerType = triggerDecision.trigger_type;
 
       if (!triggerType) {
         logger.debug("Trigger engine evaluated with no action", {
@@ -245,6 +253,7 @@ async function processHourlyParametricTriggers() {
         userId,
         city,
         triggerType,
+        trigger_type: triggerType,
         rainfall,
         temperature,
         aqi
