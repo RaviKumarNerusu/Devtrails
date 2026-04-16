@@ -18,6 +18,9 @@ Expected base URL example:
 Set backend environment variable:
 - `ML_SERVICE_URL=https://devtrails-ml-service.onrender.com/predict`
 
+Live deployment used for this project:
+- `https://devtrails-ml-service.onrender.com`
+
 ## Option 2: Railway
 
 1. Create a new Railway project from this repo.

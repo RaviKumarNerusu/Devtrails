@@ -1,7 +1,7 @@
 const axios = require("axios");
 const { logAudit } = require("./auditLogService");
 
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://127.0.0.1:5001/predict";
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "https://devtrails-ml-service.onrender.com/predict";
 
 function normalizeRiskScore(value) {
   const score = Number(value);
@@ -22,7 +22,7 @@ async function getRiskScore(data) {
 
   try {
     const response = await axios.post(ML_SERVICE_URL, payload, {
-      timeout: Number(process.env.ML_SERVICE_TIMEOUT_MS || 3000)
+      timeout: Number(process.env.ML_SERVICE_TIMEOUT_MS || 10000)
     });
 
     const riskScore = normalizeRiskScore(response?.data?.risk_score);
