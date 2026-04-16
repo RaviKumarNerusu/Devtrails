@@ -19,6 +19,7 @@ const policyRoutes = require("./routes/policyRoutes");
 const claimRoutes = require("./routes/claimRoutes");
 const premiumRoutes = require("./routes/premiumRoutes");
 const triggerRoutes = require("./routes/triggerRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const { startClaimAutomationScheduler } = require("./services/claimAutomationScheduler");
@@ -46,6 +47,7 @@ app.use("/api/policy", policyRoutes);
 app.use("/api/claim", claimRoutes);
 app.use("/api/premium", premiumRoutes);
 app.use("/api/trigger", triggerRoutes);
+app.use("/api/payment", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
 
