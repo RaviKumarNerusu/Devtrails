@@ -1,6 +1,5 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../services/apiClient.js";
 
 const PLANS = [
   {
@@ -36,30 +35,8 @@ export default function PlanSelectionPage() {
     setLoadingPlanId(planId);
     localStorage.setItem("selected_plan_id", planId);
 
-    const selected = PLANS.find((plan) => plan.id === planId);
-    const validTill = Date.now() + 7 * 24 * 60 * 60 * 1000;
-
-    try {
-      await api.post("/plan/activate", {
-        name: selected?.name || "Standard Cover",
-        validTill
-      });
-
-      localStorage.setItem(
-        "activePlan",
-        JSON.stringify({
-          name: selected?.name || "Standard Cover",
-          validTill,
-          status: "active"
-        })
-      );
-
-      navigate("/app");
-    } catch (err) {
-      setError(err?.response?.data?.message || err.message || "Failed to activate plan");
-    } finally {
-      setLoadingPlanId("");
-    }
+    navigate("/payment");
+    setLoadingPlanId("");
   };
 
   return (

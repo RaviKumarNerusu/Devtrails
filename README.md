@@ -60,6 +60,17 @@ When user has no active policy:
 4. Optional AI/ML add-on vars:
   - `ML_SERVICE_URL=https://devtrails-ml-service.onrender.com/predict`
   - `ML_SERVICE_TIMEOUT_MS=10000`
+5. Optional payment vars for Razorpay test mode:
+  - `RAZORPAY_KEY_ID` (server)
+  - `RAZORPAY_KEY_SECRET` (server)
+  - `VITE_RAZORPAY_KEY_ID` (client, same public key id)
+
+Payment flow:
+
+- Select a plan from `/plans`.
+- The app opens `/payment` and loads Razorpay checkout.
+- Use the Razorpay test bank account, test card, or test UPI details inside the checkout popup.
+- On successful verification, the backend activates the plan and enables payouts.
 
 Run backend:
 
