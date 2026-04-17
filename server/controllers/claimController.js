@@ -300,6 +300,14 @@ async function listAllClaims(req, res, next) {
   }
 }
 
+async function listPendingClaimsForAdmin(req, res, next) {
+  req.query = {
+    ...(req.query || {}),
+    status: req.query?.status || "pending_approval"
+  };
+  return listAllClaims(req, res, next);
+}
+
 /**
  * Get claim statistics for user
  * GET /api/claim/stats
@@ -356,7 +364,7 @@ async function getClaimStats(req, res, next) {
  */
 async function approveClaimByAdmin(req, res, next) {
   try {
-    const claimId = req.body?.claimId || req.body?.claim_id;
+    const claimId = req.params?.claimId || req.body?.claimId || req.body?.claim_id;
     const reason = String(req.body?.reason || "approved_by_admin").trim();
 
     if (!claimId || !Types.ObjectId.isValid(claimId)) {
@@ -398,7 +406,7 @@ async function approveClaimByAdmin(req, res, next) {
         throw err;
       }
 
-      const approvableStatuses = new Set(["pending_approval", "eligible", "claimed"]);
+      const approvableStatuses = new Set(["pending_approval", "pending", "eligible", "claimed"]);
       if (!approvableStatuses.has(currentStatus)) {
         const err = new Error("Only pending claims can be approved");
         err.statusCode = 409;
@@ -439,10 +447,9 @@ async function approveClaimByAdmin(req, res, next) {
         });
       }
 
-      claim.status = "paid";
       claim.paidAt = claim.paidAt || new Date();
       claim.auditLogs.push({
-        action: "CLAIM_PAID",
+        action: "CLAIM_PAYOUT_CREDITED",
         timestamp: new Date(),
         details: {
           adminId: String(req.user._id),
@@ -492,7 +499,7 @@ async function approveClaimByAdmin(req, res, next) {
  */
 async function rejectClaimByAdmin(req, res, next) {
   try {
-    const claimId = req.body?.claimId || req.body?.claim_id;
+    const claimId = req.params?.claimId || req.body?.claimId || req.body?.claim_id;
     const reason = String(req.body?.reason || "rejected_by_admin").trim();
 
     if (!claimId || !Types.ObjectId.isValid(claimId)) {
@@ -532,7 +539,7 @@ async function rejectClaimByAdmin(req, res, next) {
       throw err;
     }
 
-    const rejectableStatuses = new Set(["pending_approval", "eligible", "claimed"]);
+    const rejectableStatuses = new Set(["pending_approval", "pending", "eligible", "claimed"]);
     if (!rejectableStatuses.has(currentStatus)) {
       const err = new Error("Only pending claims can be rejected");
       err.statusCode = 409;
@@ -592,6 +599,7 @@ module.exports = {
   getClaimDetails,
   getClaimStats,
   listAllClaims,
+  listPendingClaimsForAdmin,
   approveClaimByAdmin,
   rejectClaimByAdmin
 };

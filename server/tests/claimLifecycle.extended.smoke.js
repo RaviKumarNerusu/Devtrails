@@ -131,12 +131,12 @@ async function main() {
 
     const autoAfterPolicy = await request(baseUrl, "POST", "/claim/auto", userProfileNoPolicy.token, {});
     assert.strictEqual(autoAfterPolicy.data.success, true);
-    assert.ok(["not_eligible", "eligible"].includes(autoAfterPolicy.data.status));
+    assert.ok(["not_eligible", "eligible", "pending_approval"].includes(autoAfterPolicy.data.status));
     assert.ok(autoAfterPolicy.data.claim?._id);
 
     const autoProfileSecond = await request(baseUrl, "POST", "/claim/auto", userProfileNoPolicy.token, {});
     assert.strictEqual(autoProfileSecond.data.success, true);
-    assert.ok(["not_eligible", "eligible"].includes(autoProfileSecond.data.status));
+    assert.ok(["not_eligible", "eligible", "pending_approval"].includes(autoProfileSecond.data.status));
     assert.strictEqual(autoProfileSecond.data.claim._id, autoAfterPolicy.data.claim._id);
 
     const policyCreated = await Policy.findOne({ userId: userProfileNoPolicy.userId, isActive: true }).lean();
@@ -197,7 +197,7 @@ async function main() {
     const statusSet = new Set(insurerClaims.data.claims.map((c) => c.status));
     assert.ok(statusSet.size >= 1, "Expected claim history to contain at least one status");
     assert.ok(
-      [...statusSet].some((s) => ["eligible", "approved", "not_eligible", "claimed", "rejected"].includes(s)),
+      [...statusSet].some((s) => ["eligible", "pending_approval", "approved", "not_eligible", "claimed", "rejected"].includes(s)),
       "Expected claim history to include valid lifecycle statuses"
     );
 

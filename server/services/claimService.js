@@ -45,6 +45,7 @@ const DEFAULT_ENABLED_FACTORS = {
 
 function normalizeStatus(value) {
   const status = String(value || "").toLowerCase();
+  if (status === "pending") return "pending_approval";
   return ["not_eligible", "eligible", "pending_approval", "approved", "rejected", "paid", "claimed"].includes(status)
     ? status
     : "not_eligible";
@@ -261,30 +262,11 @@ function deriveConfidenceDecision(riskScore, fraudScore, eligible) {
       decision_reason: "threshold_not_met"
     };
   }
-
-  if (confidenceScore > 0.6) {
-    return {
-      confidence_score: confidenceScore,
-      forceStatus: "eligible",
-      requiresAdminReview: false,
-      decision_reason: "auto_approve_high_confidence"
-    };
-  }
-
-  if (confidenceScore >= 0.3) {
-    return {
-      confidence_score: confidenceScore,
-      forceStatus: "eligible",
-      requiresAdminReview: true,
-      decision_reason: "manual_review_required_medium_confidence"
-    };
-  }
-
   return {
     confidence_score: confidenceScore,
-    forceStatus: "eligible",
+    forceStatus: "pending_approval",
     requiresAdminReview: true,
-    decision_reason: "manual_review_required_low_confidence"
+    decision_reason: "manual_review_required"
   };
 }
 
@@ -357,12 +339,12 @@ async function upsertDailyClaimRecord({
   fraudReason = ""
 }) {
   const claimDate = getLocalDateOnly();
-  let nextStatus = forceStatus || (eligible ? "eligible" : "not_eligible");
+  let nextStatus = normalizeStatus(forceStatus || (eligible ? "pending_approval" : "not_eligible"));
   const existingClaim = await Claim.findOne({ userId, date: claimDate });
 
   // Preserve eligibility once reached for the day unless an explicit forceStatus is provided.
-  if (!forceStatus && existingClaim && normalizeStatus(existingClaim.status) === "eligible" && nextStatus === "not_eligible") {
-    nextStatus = "eligible";
+  if (!forceStatus && existingClaim && normalizeStatus(existingClaim.status) === "pending_approval" && nextStatus === "not_eligible") {
+    nextStatus = "pending_approval";
   }
 
   if (existingClaim && TERMINAL_STATUSES.has(normalizeStatus(existingClaim.status))) {
@@ -700,7 +682,7 @@ async function evaluateClaimEligibility(user, options = {}) {
     confidenceScore: confidence.confidence_score,
     weeklyPremium,
     eligible,
-    status: claim?.status || (eligible ? "eligible" : "not_eligible"),
+    status: claim?.status || (eligible ? "pending_approval" : "not_eligible"),
     claim
   };
 }
@@ -713,16 +695,14 @@ async function requestClaimForApproval(user, claimId = null) {
 
   const query = {
     userId: user._id,
-    status: "eligible"
+    status: { $in: ["eligible", "pending_approval"] }
   };
 
   if (claimId) {
     const reviewedClaim = await Claim.findOne({ _id: claimId, userId: user._id }).select("requiresAdminReview status").lean();
     if (normalizeStatus(reviewedClaim?.status) === "pending_approval") {
-      const err = new Error("Claim is already pending admin approval.");
-      err.statusCode = 409;
-      err.errorCode = "CLAIM_ALREADY_PENDING";
-      throw err;
+      const existingPending = await Claim.findOne({ _id: claimId, userId: user._id });
+      return existingPending;
     }
     query._id = claimId;
   }
@@ -798,7 +778,7 @@ async function createAutoTriggeredClaim(user, triggerType = "rain", options = {}
     return result;
   }
 
-  if (result.claim.status === "eligible") {
+  if (result.claim.status === "pending_approval") {
     result.eligible = true;
   }
 
@@ -845,8 +825,10 @@ async function listClaimsForInsurer({ page = 1, limit = 20, userId, status, from
   }
 
   const normalized = normalizeStatus(status);
-  if (status && normalized === status) {
-    query.status = normalized;
+  if (status && normalized !== "not_eligible") {
+    query.status = normalized === "pending_approval"
+      ? { $in: ["pending_approval", "eligible"] }
+      : normalized;
   }
 
   if (from || to) {

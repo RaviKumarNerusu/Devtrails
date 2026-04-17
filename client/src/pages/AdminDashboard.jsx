@@ -41,7 +41,7 @@ export default function AdminDashboard() {
     );
     const pendingClaims = claims.filter((item) => {
       const status = String(item.status || "").toLowerCase();
-      return status === "eligible" || Boolean(item.requiresAdminReview);
+      return ["pending_approval", "pending", "eligible"].includes(status) || Boolean(item.requiresAdminReview);
     }).length;
     const totalPayout = Number(analytics?.totalPayout || 0);
     const lossRatio = Number(analytics?.lossRatio || 0);

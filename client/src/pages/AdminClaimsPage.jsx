@@ -54,7 +54,7 @@ export default function AdminClaimsPage() {
   const actionableClaims = useMemo(() => {
     return claims.filter((claim) => {
       const status = String(claim.status || "").toLowerCase();
-      return status === "pending_approval";
+      return status === "pending_approval" || status === "pending" || status === "eligible";
     });
   }, [claims]);
 
@@ -67,7 +67,11 @@ export default function AdminClaimsPage() {
       const name = String(claim?.userId?.name || "").toLowerCase();
       const email = String(claim?.userId?.email || "").toLowerCase();
 
-      const statusMatch = statusFilter === "all" ? true : status === statusFilter;
+      const statusMatch = statusFilter === "all"
+        ? true
+        : statusFilter === "pending_approval"
+          ? (status === "pending_approval" || status === "pending" || status === "eligible")
+          : status === statusFilter;
       const triggerMatch = triggerFilter === "all" ? true : trigger === triggerFilter;
       const searchMatch = !q || name.includes(q) || email.includes(q) || String(claim.fraud_reason || "").toLowerCase().includes(q);
 
@@ -100,7 +104,7 @@ export default function AdminClaimsPage() {
         String(item._id) === String(claimId)
           ? {
               ...item,
-              status: "paid",
+              status: "approved",
               requiresAdminReview: false,
               adminDecision: "approved"
             }
@@ -190,7 +194,6 @@ export default function AdminClaimsPage() {
               >
                 <option value="pending_approval">Pending</option>
                 <option value="approved">Approved</option>
-                <option value="paid">Paid</option>
                 <option value="rejected">Rejected</option>
                 <option value="all">All statuses</option>
               </select>
@@ -244,7 +247,7 @@ export default function AdminClaimsPage() {
                 pagedClaims.map((claim) => {
                   const claimId = String(claim._id || "");
                   const status = String(claim.status || "").toLowerCase();
-                  const canModerate = ["pending_approval", "eligible", "claimed"].includes(status);
+                  const canModerate = ["pending_approval", "pending", "eligible", "claimed"].includes(status);
 
                   return (
                     <tr key={claimId} className={Number(claim.fraud_score || 0) >= 0.7 ? "table-danger" : ""}>

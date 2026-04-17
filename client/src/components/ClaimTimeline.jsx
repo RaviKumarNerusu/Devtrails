@@ -20,7 +20,11 @@ export default function ClaimTimeline({ claim }) {
       <Step
         label="Requested"
         date={claim.requestedAt || claim.claimedAt}
-        active={Boolean(claim.requestedAt || claim.claimedAt || String(claim.status || "").toLowerCase() === "pending_approval")}
+        active={Boolean(
+          claim.requestedAt ||
+          claim.claimedAt ||
+          ["pending_approval", "pending"].includes(String(claim.status || "").toLowerCase())
+        )}
       />
       <Step label="Approved" date={claim.approvedAt} active={Boolean(claim.approvedAt)} />
       <Step label="Paid" date={claim.paidAt} active={Boolean(claim.paidAt || String(claim.status || "").toLowerCase() === "paid")} />

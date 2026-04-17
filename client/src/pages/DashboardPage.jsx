@@ -23,11 +23,11 @@ function claimStatusLabel(claim) {
   const amount = Number(claim?.payoutAmount ?? claim?.amount ?? 0);
 
   if (status === "eligible") return amount > 0 ? `Eligible for Rs ${amount.toFixed(0)}` : "Eligible today";
-  if (status === "pending_approval") return "Pending admin approval";
+  if (status === "pending_approval" || status === "pending") return "Waiting for admin approval";
   if (status === "claimed") return "Claimed";
-  if (status === "approved") return "Approved";
+  if (status === "approved") return "Payout credited";
   if (status === "paid") return "Paid";
-  if (status === "rejected") return "Rejected";
+  if (status === "rejected") return "Claim rejected";
   return "Not Eligible Today";
 }
 
@@ -666,6 +666,7 @@ export default function DashboardPage() {
 
                   const risk = todayComp.riskLevel || "UNKNOWN";
                   const payout = Number(todayComp.payoutAmount || 0);
+                  const claimStatus = String(todayClaim?.status || "").toLowerCase();
 
                   if (payout <= 0) {
                     return (
@@ -681,8 +682,14 @@ export default function DashboardPage() {
                       <div className={risk === "HIGH" || risk === "SEVERE" ? "fw-semibold text-warning" : "fw-semibold"}>
                         {risk === "MEDIUM" ? "Minor income impact" : "⚠️ Disruption detected"}
                       </div>
-                      <div className="text-muted small">Payout credited: ₹{payout.toFixed(0)}</div>
-                      <div className="text-success small">✅ Payout credited</div>
+                      <div className="text-muted small">Estimated payout: ₹{payout.toFixed(0)}</div>
+                      {claimStatus === "pending_approval" || claimStatus === "pending" ? (
+                        <div className="text-warning small">Waiting for admin approval</div>
+                      ) : claimStatus === "approved" || claimStatus === "paid" ? (
+                        <div className="text-success small">Payout credited</div>
+                      ) : claimStatus === "rejected" ? (
+                        <div className="text-danger small">Claim rejected</div>
+                      ) : null}
                     </>
                   );
 
@@ -720,16 +727,16 @@ export default function DashboardPage() {
 
         {claimError ? <div className="alert alert-info">{claimError}</div> : null}
 
-        {policyInfo?.isActive && String(todayClaim?.status || "").toLowerCase() === "eligible" ? (
-          <div className="alert alert-success d-flex justify-content-between align-items-center">
+        {policyInfo?.isActive && ["pending_approval", "pending"].includes(String(todayClaim?.status || "").toLowerCase()) ? (
+          <div className="alert alert-warning d-flex justify-content-between align-items-center">
             <div>
-              <div className="fw-semibold">Claim Available!</div>
+              <div className="fw-semibold">Waiting for admin approval</div>
               <div className="small">
-                {getTriggerLabel(todayClaim)} exceeded configured thresholds. You can claim this daily record now.
+                {getTriggerLabel(todayClaim)} exceeded configured thresholds. Your claim is in admin queue.
               </div>
             </div>
-            <Link to="/claims" className="btn btn-sm btn-success">
-              Claim Now
+            <Link to="/claims" className="btn btn-sm btn-outline-warning">
+              View Claim
             </Link>
           </div>
         ) : null}

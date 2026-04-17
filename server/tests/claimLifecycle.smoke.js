@@ -122,12 +122,12 @@ async function main() {
     assert.strictEqual(afterFirstClaims.claims[0].status, "not_eligible");
 
     const secondAuto = await request(baseUrl, "POST", "/claim/auto", authHeaders, {});
-    assert.strictEqual(secondAuto.status, "eligible");
+    assert.strictEqual(secondAuto.status, "pending_approval");
     assert.strictEqual(secondAuto.claim._id, cleanup.claimId, "Expected the same claim document to be updated, not duplicated");
 
     const afterSecondClaims = await request(baseUrl, "GET", "/claim/my", authHeaders);
     assert.strictEqual(afterSecondClaims.claims.length, 1, "Expected a single claim document after update");
-    assert.strictEqual(afterSecondClaims.claims[0].status, "eligible");
+    assert.strictEqual(afterSecondClaims.claims[0].status, "pending_approval");
 
     const redeem = await request(baseUrl, "POST", "/claim/redeem", authHeaders, {
       claimId: cleanup.claimId
@@ -136,7 +136,7 @@ async function main() {
 
     const afterRedeemAttemptClaims = await request(baseUrl, "GET", "/claim/my", authHeaders);
     assert.strictEqual(afterRedeemAttemptClaims.claims.length, 1, "Redeem attempt should not create duplicate claims");
-    assert.strictEqual(afterRedeemAttemptClaims.claims[0].status, "eligible");
+    assert.strictEqual(afterRedeemAttemptClaims.claims[0].status, "pending_approval");
 
     const claimCount = await Claim.countDocuments({ userId: cleanup.userId });
     assert.strictEqual(claimCount, 1, "Database should contain exactly one claim for the day");
