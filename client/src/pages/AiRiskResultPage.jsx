@@ -85,7 +85,7 @@ export default function AiRiskResultPage() {
         <button className="btn btn-primary me-2" onClick={handleContinue}>
           Continue to weekly plans
         </button>
-        <Link to="/app" className="btn btn-outline-secondary">
+        <Link to="/dashboard" className="btn btn-outline-secondary">
           Skip to dashboard
         </Link>
       </div>

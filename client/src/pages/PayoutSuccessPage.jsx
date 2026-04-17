@@ -18,7 +18,7 @@ export default function PayoutSuccessPage() {
               <Link to="/claim-history" className="btn btn-primary">
                 View claim history
               </Link>
-              <Link to="/app" className="btn btn-outline-secondary">
+              <Link to="/dashboard" className="btn btn-outline-secondary">
                 Back to dashboard
               </Link>
             </div>

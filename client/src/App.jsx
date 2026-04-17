@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Navigate, Route, Routes, Link } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, Link } from "react-router-dom";
 import { AuthProvider, useAuth } from "./authContext.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import RegisterPage from "./pages/RegisterPage.jsx";
@@ -15,21 +15,71 @@ import ClaimHistoryPage from "./pages/ClaimHistoryPage.jsx";
 import AnalyticsDashboardPage from "./pages/AnalyticsDashboardPage.jsx";
 import SupportPage from "./pages/SupportPage.jsx";
 import ClaimsPage from "./pages/ClaimsPage.jsx";
+import AdminLayout from "./pages/AdminLayout.jsx";
+import AdminDashboard from "./pages/AdminDashboard.jsx";
+import AdminClaimsPage from "./pages/AdminClaimsPage.jsx";
+import AdminAnalyticsPage from "./pages/AdminAnalyticsPage.jsx";
+import AdminFraudPage from "./pages/AdminFraudPage.jsx";
+
+function normalizeRole(role) {
+  return String(role || "").toLowerCase();
+}
+
+function isAdminRole(role) {
+  const value = normalizeRole(role);
+  return value === "admin" || value === "insurer";
+}
+
+function resolveHomePath(role) {
+  return isAdminRole(role) ? "/admin/dashboard" : "/dashboard";
+}
 
 // Protected Route Wrapper
-function PrivateRoute({ children }) {
+function PrivateRoute({ children, requireAdmin = false, requireWorker = false }) {
   const { user } = useAuth();
+
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (requireAdmin && !isAdminRole(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (requireWorker && isAdminRole(user.role)) {
+    return <Navigate to="/admin/dashboard" replace />;
+  }
+
+  return children;
+}
+
+function PublicOnlyRoute({ children }) {
+  const { user } = useAuth();
+  if (user) {
+    return <Navigate to={resolveHomePath(user.role)} replace />;
   }
   return children;
 }
 
-function Shell() {
+function HomeRedirect() {
+  const { user } = useAuth();
+  if (!user) {
+    return <LandingPage />;
+  }
+  return <Navigate to={resolveHomePath(user.role)} replace />;
+}
+
+function LegacyAppRedirect() {
+  const { user } = useAuth();
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return <Navigate to={resolveHomePath(user.role)} replace />;
+}
+
+function WorkerShell() {
   const { user, logout } = useAuth();
   const [dark, setDark] = useState(false);
-  const role = String(user?.role || "").toLowerCase();
-  const isAdminView = role === "admin" || role === "insurer";
 
   return (
     <div className={`ig-app ${dark ? "bg-dark text-light" : "bg-light text-dark"} min-vh-100`}>
@@ -64,25 +114,23 @@ function Shell() {
               {user && (
                 <>
                   <li className="nav-item">
-                    <Link to="/app" className="nav-link">
+                    <Link to="/dashboard" className="nav-link">
                       Dashboard
                     </Link>
                   </li>
                   <li className="nav-item">
                     <Link to="/analytics" className="nav-link">
-                      {isAdminView ? "Admin Analytics" : "Analytics"}
+                      Analytics
                     </Link>
                   </li>
-                  {!isAdminView ? (
-                    <li className="nav-item">
-                      <Link to="/claim-history" className="nav-link">
-                        Claim History
-                      </Link>
-                    </li>
-                  ) : null}
+                  <li className="nav-item">
+                    <Link to="/claim-history" className="nav-link">
+                      Claim History
+                    </Link>
+                  </li>
                   <li className="nav-item">
                     <Link to="/support" className="nav-link">
-                      {isAdminView ? "Support Control" : "Support"}
+                      Support
                     </Link>
                   </li>
                   <li className="nav-item">
@@ -92,7 +140,7 @@ function Shell() {
                   </li>
                   <li className="nav-item">
                     <Link to="/claims" className="nav-link">
-                      {isAdminView ? "Claims Control" : "Claims"}
+                      Claims
                     </Link>
                   </li>
                 </>
@@ -144,110 +192,159 @@ function Shell() {
       </nav>
 
       <main className="container py-5 ig-main">
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route
-            path="/app"
-            element={
-              <PrivateRoute>
-                <DashboardPage />
-              </PrivateRoute>
-            }
-          />
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/onboarding"
-            element={
-              <PrivateRoute>
-                <OnboardingPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/ai-risk-result"
-            element={
-              <PrivateRoute>
-                <AiRiskResultPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/plans"
-            element={
-              <PrivateRoute>
-                <PlanSelectionPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/payment"
-            element={
-              <PrivateRoute>
-                <PaymentPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/disruption-alerts"
-            element={
-              <PrivateRoute>
-                <DisruptionAlertPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/payout-success"
-            element={
-              <PrivateRoute>
-                <PayoutSuccessPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/claim-history"
-            element={
-              <PrivateRoute>
-                <ClaimHistoryPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/analytics"
-            element={
-              <PrivateRoute>
-                <AnalyticsDashboardPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/support"
-            element={
-              <PrivateRoute>
-                <SupportPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/policy"
-            element={
-              <PrivateRoute>
-                <Navigate to="/plans" replace />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/claims"
-            element={
-              <PrivateRoute>
-                <ClaimsPage />
-              </PrivateRoute>
-            }
-          />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Outlet />
       </main>
     </div>
+  );
+}
+
+function Shell() {
+  return (
+    <Routes>
+      <Route element={<WorkerShell />}>
+        <Route path="/" element={<HomeRedirect />} />
+        <Route
+          path="/login"
+          element={
+            <PublicOnlyRoute>
+              <LoginPage />
+            </PublicOnlyRoute>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <PublicOnlyRoute>
+              <RegisterPage />
+            </PublicOnlyRoute>
+          }
+        />
+
+        <Route
+          path="/dashboard"
+          element={
+            <PrivateRoute requireWorker>
+              <DashboardPage />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/app"
+          element={
+            <PrivateRoute>
+              <LegacyAppRedirect />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/onboarding"
+          element={
+            <PrivateRoute requireWorker>
+              <OnboardingPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/ai-risk-result"
+          element={
+            <PrivateRoute requireWorker>
+              <AiRiskResultPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/plans"
+          element={
+            <PrivateRoute requireWorker>
+              <PlanSelectionPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/payment"
+          element={
+            <PrivateRoute requireWorker>
+              <PaymentPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/disruption-alerts"
+          element={
+            <PrivateRoute requireWorker>
+              <DisruptionAlertPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/payout-success"
+          element={
+            <PrivateRoute requireWorker>
+              <PayoutSuccessPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/claim-history"
+          element={
+            <PrivateRoute requireWorker>
+              <ClaimHistoryPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            <PrivateRoute requireWorker>
+              <AnalyticsDashboardPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/support"
+          element={
+            <PrivateRoute requireWorker>
+              <SupportPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/policy"
+          element={
+            <PrivateRoute requireWorker>
+              <Navigate to="/plans" replace />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/claims"
+          element={
+            <PrivateRoute requireWorker>
+              <ClaimsPage />
+            </PrivateRoute>
+          }
+        />
+      </Route>
+
+      <Route
+        path="/admin"
+        element={
+          <PrivateRoute requireAdmin>
+            <AdminLayout />
+          </PrivateRoute>
+        }
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="claims" element={<AdminClaimsPage />} />
+        <Route path="analytics" element={<AdminAnalyticsPage />} />
+        <Route path="fraud" element={<AdminFraudPage />} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 

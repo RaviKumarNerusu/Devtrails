@@ -72,7 +72,7 @@ export default function PolicyPage() {
               <Link to="/plans" className="btn btn-primary">
                 Select / Change Plan
               </Link>
-              <Link to="/app" className="btn btn-outline-secondary">
+              <Link to="/dashboard" className="btn btn-outline-secondary">
                 Back to Dashboard
               </Link>
             </div>

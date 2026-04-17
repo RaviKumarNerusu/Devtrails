@@ -107,7 +107,7 @@ export default function PaymentPage() {
             );
           }
 
-          navigate("/app");
+          navigate("/dashboard");
         }
       });
 

@@ -6,6 +6,9 @@ const {
   listClaimsForInsurer,
   isClaimEligibleStatus
 } = require("../services/claimService");
+const { simulateClaimPayout } = require("../services/payoutService");
+const { executeInTransaction } = require("../utils/transactionHelper");
+const { logAudit } = require("../services/auditLogService");
 const { getLocalDateOnly } = require("../utils/claimValidator");
 const logger = require("../utils/logger");
 const { Types } = require("mongoose");
@@ -307,12 +310,193 @@ async function getClaimStats(req, res, next) {
   }
 }
 
+/**
+ * Admin: approve a claim
+ * POST /api/admin/claim/approve
+ */
+async function approveClaimByAdmin(req, res, next) {
+  try {
+    const claimId = req.body?.claimId;
+    const reason = String(req.body?.reason || "approved_by_admin").trim();
+
+    if (!claimId || !Types.ObjectId.isValid(claimId)) {
+      const err = new Error("Invalid claim id");
+      err.statusCode = 400;
+      err.errorCode = "INVALID_CLAIM_ID";
+      throw err;
+    }
+
+    const updatedClaim = await executeInTransaction(async (session) => {
+      const claim = await Claim.findById(claimId).session(session);
+      if (!claim) {
+        const err = new Error("Claim not found");
+        err.statusCode = 404;
+        err.errorCode = "CLAIM_NOT_FOUND";
+        throw err;
+      }
+
+      const currentStatus = String(claim.status || "").toLowerCase();
+      if (currentStatus === "approved") {
+        const err = new Error("Claim is already approved");
+        err.statusCode = 409;
+        err.errorCode = "CLAIM_ALREADY_APPROVED";
+        throw err;
+      }
+
+      if (currentStatus === "rejected") {
+        const err = new Error("Rejected claim cannot be approved");
+        err.statusCode = 409;
+        err.errorCode = "CLAIM_ALREADY_REJECTED";
+        throw err;
+      }
+
+      claim.status = "approved";
+      claim.approvedAt = claim.approvedAt || new Date();
+      claim.requiresAdminReview = false;
+      claim.adminDecision = "approved";
+      claim.adminReviewReason = reason;
+      claim.adminReviewedBy = req.user._id;
+      claim.adminReviewedAt = new Date();
+      claim.auditLogs.push({
+        action: "CLAIM_APPROVED_BY_ADMIN",
+        timestamp: new Date(),
+        details: {
+          adminId: String(req.user._id),
+          previousStatus: currentStatus,
+          reason
+        }
+      });
+      await claim.save({ session });
+
+      if (Number(claim.payoutAmount || 0) > 0 && !claim.paidAt) {
+        await simulateClaimPayout({
+          claimId: claim._id,
+          userId: claim.userId,
+          payoutAmount: claim.payoutAmount,
+          session
+        });
+      }
+
+      return claim;
+    });
+
+    await logAudit("CLAIM_APPROVED_BY_ADMIN", req.user._id, {
+      claimId,
+      reason,
+      status: updatedClaim.status
+    });
+
+    return res.json({
+      success: true,
+      claim: normalizeClaimPayload(updatedClaim),
+      data: { claim: normalizeClaimPayload(updatedClaim) },
+      message: "Claim approved successfully"
+    });
+  } catch (err) {
+    logger.error("Admin claim approval failed", {
+      adminId: req.user?._id?.toString(),
+      claimId: req.body?.claimId,
+      error: err.message,
+      errorCode: err.errorCode
+    });
+
+    err.statusCode = err.statusCode || 500;
+    err.errorCode = err.errorCode || "ADMIN_CLAIM_APPROVAL_FAILED";
+    next(err);
+  }
+}
+
+/**
+ * Admin: reject a claim
+ * POST /api/admin/claim/reject
+ */
+async function rejectClaimByAdmin(req, res, next) {
+  try {
+    const claimId = req.body?.claimId;
+    const reason = String(req.body?.reason || "rejected_by_admin").trim();
+
+    if (!claimId || !Types.ObjectId.isValid(claimId)) {
+      const err = new Error("Invalid claim id");
+      err.statusCode = 400;
+      err.errorCode = "INVALID_CLAIM_ID";
+      throw err;
+    }
+
+    const claim = await Claim.findById(claimId);
+    if (!claim) {
+      const err = new Error("Claim not found");
+      err.statusCode = 404;
+      err.errorCode = "CLAIM_NOT_FOUND";
+      throw err;
+    }
+
+    const currentStatus = String(claim.status || "").toLowerCase();
+    if (currentStatus === "rejected") {
+      const err = new Error("Claim is already rejected");
+      err.statusCode = 409;
+      err.errorCode = "CLAIM_ALREADY_REJECTED";
+      throw err;
+    }
+
+    if (currentStatus === "approved") {
+      const err = new Error("Approved claim cannot be rejected");
+      err.statusCode = 409;
+      err.errorCode = "CLAIM_ALREADY_APPROVED";
+      throw err;
+    }
+
+    claim.status = "rejected";
+    claim.requiresAdminReview = false;
+    claim.adminDecision = "rejected";
+    claim.adminReviewReason = reason;
+    claim.adminReviewedBy = req.user._id;
+    claim.adminReviewedAt = new Date();
+    claim.auditLogs.push({
+      action: "CLAIM_REJECTED_BY_ADMIN",
+      timestamp: new Date(),
+      details: {
+        adminId: String(req.user._id),
+        previousStatus: currentStatus,
+        reason
+      }
+    });
+
+    await claim.save();
+
+    await logAudit("CLAIM_REJECTED_BY_ADMIN", req.user._id, {
+      claimId,
+      reason,
+      status: claim.status
+    });
+
+    return res.json({
+      success: true,
+      claim: normalizeClaimPayload(claim),
+      data: { claim: normalizeClaimPayload(claim) },
+      message: "Claim rejected successfully"
+    });
+  } catch (err) {
+    logger.error("Admin claim rejection failed", {
+      adminId: req.user?._id?.toString(),
+      claimId: req.body?.claimId,
+      error: err.message,
+      errorCode: err.errorCode
+    });
+
+    err.statusCode = err.statusCode || 500;
+    err.errorCode = err.errorCode || "ADMIN_CLAIM_REJECTION_FAILED";
+    next(err);
+  }
+}
+
 module.exports = {
   autoClaim,
   listMyClaims,
   redeemClaim,
   getClaimDetails,
   getClaimStats,
-  listAllClaims
+  listAllClaims,
+  approveClaimByAdmin,
+  rejectClaimByAdmin
 };
 

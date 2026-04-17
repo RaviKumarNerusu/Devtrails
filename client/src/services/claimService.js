@@ -41,6 +41,41 @@ export async function getAllClaims(params = {}) {
   };
 }
 
+export async function getAdminClaims(params = {}) {
+  const { data } = await api.get("/admin/claims", { headers: authHeaders(), params });
+  const claims = Array.isArray(data?.claims) ? data.claims.map(normalizeClaim) : [];
+  return {
+    claims,
+    pagination: data?.pagination || null
+  };
+}
+
+export async function approveClaimByAdmin(claimId, reason = "") {
+  const { data } = await api.post(
+    "/admin/claim/approve",
+    { claimId, reason },
+    { headers: authHeaders() }
+  );
+
+  return {
+    ...data,
+    claim: data?.claim ? normalizeClaim(data.claim) : null
+  };
+}
+
+export async function rejectClaimByAdmin(claimId, reason = "") {
+  const { data } = await api.post(
+    "/admin/claim/reject",
+    { claimId, reason },
+    { headers: authHeaders() }
+  );
+
+  return {
+    ...data,
+    claim: data?.claim ? normalizeClaim(data.claim) : null
+  };
+}
+
 export async function redeemClaimNow(claimId = null) {
   const payload = claimId ? { claimId } : {};
   const { data } = await api.post("/claim/redeem", payload, { headers: authHeaders() });

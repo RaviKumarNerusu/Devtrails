@@ -30,7 +30,7 @@ export default function LandingPage() {
           </p>
           <div className="d-flex flex-wrap gap-2 mb-3 ig-reveal ig-reveal-delay-3">
             {user ? (
-              <Link to="/app" className="btn btn-primary btn-lg ig-btn-pulse">
+              <Link to="/dashboard" className="btn btn-primary btn-lg ig-btn-pulse">
                 Go to dashboard
               </Link>
             ) : (
