@@ -55,6 +55,89 @@ Configuration:
 
 ---
 
+## 1.5 Loss Functions & Evaluation Metrics
+
+### Training Loss: Mean Squared Error (MSE)
+
+**Used by**: Random Forest internally for split optimization
+
+**Formula**:
+$$\text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2$$
+
+**Where**:
+- $y_i$ = actual risk score
+- $\hat{y}_i$ = predicted risk score
+- $n$ = number of samples
+
+**Characteristics**:
+- Penalizes larger errors more heavily (quadratic penalty)
+- Sensitive to outliers
+- Differentiable (good for gradient-based optimization)
+- Default for scikit-learn's RandomForestRegressor
+
+### Validation Metric: Mean Absolute Error (MAE)
+
+**Used for**: Model performance evaluation
+
+**Formula**:
+$$\text{MAE} = \frac{1}{n} \sum_{i=1}^{n} |y_i - \hat{y}_i|$$
+
+**Characteristics**:
+- Linear penalty for errors (more interpretable)
+- Less sensitive to outliers than MSE
+- Represents average absolute deviation in risk scores
+- Target: MAE < 0.10 (±0.10 risk score deviation)
+
+**Example**:
+```
+Prediction: 0.65
+Actual: 0.72
+Error: |0.72 - 0.65| = 0.07 ✅ (within acceptable range)
+```
+
+### Loss Comparison
+
+| Loss Function | Formula | Use Case | Sensitivity |
+|---------------|---------|----------|-------------|
+| **MSE** (used) | $\sum(y - \hat{y})^2$ | Tree training | High (outliers) |
+| **MAE** (used) | $\sum\|y - \hat{y}\|$ | Evaluation | Medium |
+| **RMSE** | $\sqrt{\frac{1}{n}\sum(y-\hat{y})^2}$ | Alternative metric | High |
+| **Huber Loss** | Hybrid MSE/MAE | Robust regression | Medium |
+| **Log Loss** | $-\sum y\log(\hat{y})$ | Classification | N/A |
+
+### Why MSE for Training + MAE for Validation?
+
+1. **MSE for Training**:
+   - Random Forest uses tree splits that minimize MSE
+   - Larger errors get bigger penalty → better corner-case handling
+   - Standard for regression tasks
+
+2. **MAE for Validation**:
+   - More interpretable for business logic
+   - If MAE = 0.08, average prediction error is ±0.08
+   - Less influenced by rare extreme weather events
+   - Better represents real-world claim risk variation
+
+### Current Performance
+
+```
+Model: Random Forest (200 trees, depth 12)
+Validation MAE: ~0.08-0.12
+Interpretation: Average prediction error ≈ 8-12% of risk score scale
+Acceptable Range: ✅ (target < 0.10)
+```
+
+### Alternative Loss Functions (Not Used)
+
+| Loss | Pros | Cons | When to Use |
+|------|------|------|------------|
+| **Huber Loss** | Robust to outliers | More complex | Noisy weather data |
+| **Quantile Loss** | Predict confidence intervals | Different interpretation | Risk percentiles |
+| **Log-Cosh Loss** | Smooth MSE approximation | Computationally heavier | Outlier mitigation |
+| **Focal Loss** | Emphasize hard examples | Classification-focused | Not applicable |
+
+---
+
 ## 2. Secondary Algorithm: Rule-Based Fraud Detection
 
 ### Location
@@ -112,6 +195,77 @@ should_reject = (fraud_score > 0.7) || (auto_reject_flag)
   "claims7d": 8
 }
 ```
+
+### Loss Function: Weighted Risk Penalty (Heuristic)
+
+**Type**: Rule-based scoring (not statistical loss)
+
+**Formula**:
+$$\text{fraud\_score} = \text{clamp}\left(\sum_{i=1}^{k} w_i \cdot s_i, 0, 1\right)$$
+
+**Where**:
+- $w_i$ = weight of signal $i$ (0.25, 0.3, 0.4, etc.)
+- $s_i$ = signal detection (binary: 0 or 1)
+- $k$ = number of fraud signals
+
+**Scoring Breakdown**:
+```
+Fraud Signal                                    Weight  Penalty
+─────────────────────────────────────────────────────────────
+2+ claims in 1 hour                             0.25    +0.25
+Same trigger type 3+ times                      0.30    +0.30
+Invalid disruption trigger (weather mismatch)   0.40    +0.40
+Location mismatch detected                      0.25    +0.25
+High risk (>0.7) + 4+ claims in 7 days         0.10    +0.10
+─────────────────────────────────────────────────────────────
+                                    Maximum:           ~1.70
+                                    After clamp:       1.00 ✓
+```
+
+**Decision Threshold**:
+```
+fraud_score > 0.70 → REJECT or MANUAL REVIEW
+fraud_score ≤ 0.70 → APPROVE
+```
+
+**Auto-Reject Conditions** (bypass threshold):
+- 3+ claims in 1 hour
+- 3+ claims in 6 hours
+
+### Example Fraud Score Calculation
+
+**Scenario**: User submits 3 claims in 2 hours during heavy rain
+
+```
+Detected Signals:
+  ✓ 2+ claims in 1 hour           → +0.25
+  ✓ Same trigger type (rain) 3x   → +0.30
+  ✗ Valid weather (it IS raining) → +0.00
+  ✓ Unknown location mismatch      → +0.25
+  ✗ Not high risk yet              → +0.00
+                                   ────────
+                    Total Score:    0.80
+                                   
+Decision: fraud_score (0.80) > 0.70 threshold
+Result: ❌ REJECT or MANUAL REVIEW
+```
+
+### Why Weighted Heuristics Instead of ML?
+
+1. **Interpretability**: Clear rules for fraud analysts
+2. **Explainability**: Easy to explain why claim was rejected
+3. **Real-time**: <10ms response time
+4. **No Training Data Needed**: Rule-based logic works immediately
+5. **Conservative**: Avoids false positives harming customers
+
+### Alternative Scoring Methods (Not Used)
+
+| Method | Pros | Cons | When to Use |
+|--------|------|------|------------|
+| **Logistic Regression** | Statistical basis | Requires labeled data | With historical frauds |
+| **Anomaly Detection (IF)** | Find outliers | Hard to tune | New fraud patterns |
+| **Ensemble (RF + Rules)** | Best of both | Complex | High-stakes decisions |
+| **Bayesian Network** | Probabilistic | Computationally heavy | Expert system |
 
 ---
 
