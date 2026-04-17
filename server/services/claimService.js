@@ -20,6 +20,7 @@ const logger = require("../utils/logger");
 
 const TERMINAL_STATUSES = new Set(["pending_approval", "approved", "rejected", "paid", "claimed"]);
 const CLAIMED_FLOW_STATUSES = new Set(["eligible", "pending_approval", "approved", "paid", "claimed"]);
+const SUPPORTED_FACTORS = new Set(["rain", "heat", "pollution", "flood", "social"]);
 
 function normalizeStatus(value) {
   const status = String(value || "").toLowerCase();
@@ -434,7 +435,12 @@ async function evaluateClaimEligibility(user, options = {}) {
     validateWeatherData(rainMm, triggerContext.thresholds.rainfall_threshold);
   }
 
-  const eligible = triggerContext.eligible;
+  const enabledFactors = new Set(
+    Array.isArray(profile?.enabledFactors) && profile.enabledFactors.length > 0
+      ? profile.enabledFactors.map((item) => String(item || "").toLowerCase()).filter((item) => SUPPORTED_FACTORS.has(item))
+      : Array.from(SUPPORTED_FACTORS)
+  );
+  const eligible = triggerContext.eligible && enabledFactors.has(triggerContext.trigger_type);
 
   const pastClaims = await Claim.countDocuments({ userId: user._id });
   const mlInput = {

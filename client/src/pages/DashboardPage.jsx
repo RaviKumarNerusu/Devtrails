@@ -118,6 +118,23 @@ function formatRoleLabel(role) {
 }
 
 const RAIN_CHECK_CITIES = ["Feni", "Dhaka", "Chattogram", "Sylhet", "Khulna", "Barishal"];
+const FACTOR_OPTIONS = [
+  { key: "rain", label: "Rain" },
+  { key: "heat", label: "Heat" },
+  { key: "pollution", label: "Pollution (AQI)" },
+  { key: "flood", label: "Flood" },
+  { key: "social", label: "Social disruptions" }
+];
+const DEFAULT_ENABLED_FACTORS = FACTOR_OPTIONS.map((item) => item.key);
+
+function normalizeEnabledFactors(value) {
+  if (!Array.isArray(value)) return DEFAULT_ENABLED_FACTORS;
+  const allowed = new Set(DEFAULT_ENABLED_FACTORS);
+  const normalized = [...new Set(value.map((item) => String(item || "").trim().toLowerCase()))].filter((item) =>
+    allowed.has(item)
+  );
+  return normalized.length > 0 ? normalized : DEFAULT_ENABLED_FACTORS;
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -135,7 +152,8 @@ export default function DashboardPage() {
     district: "",
     pincode: "",
     avgDailyEarning: "",
-    rainThresholdMm: 15
+    rainThresholdMm: 15,
+    enabledFactors: DEFAULT_ENABLED_FACTORS
   });
   const [profileSaving, setProfileSaving] = useState(false);
   const [todayComp, setTodayComp] = useState(null);
@@ -206,7 +224,8 @@ export default function DashboardPage() {
           district: data.profile.district || data.profile.city || "",
           pincode: data.profile.pincode || "",
           avgDailyEarning: data.profile.avgDailyEarning?.toString() || "",
-          rainThresholdMm: data.profile.rainThresholdMm || 15
+          rainThresholdMm: data.profile.rainThresholdMm || 15,
+          enabledFactors: normalizeEnabledFactors(data.profile.enabledFactors)
         };
         setProfile(nextProfile);
         setActiveCity(nextProfile.city);
@@ -218,7 +237,8 @@ export default function DashboardPage() {
             district: nextProfile.district,
             pincode: nextProfile.pincode,
             avgEarning: Number(nextProfile.avgDailyEarning) || 0,
-            threshold: Number(nextProfile.rainThresholdMm) || 15
+            threshold: Number(nextProfile.rainThresholdMm) || 15,
+            enabledFactors: nextProfile.enabledFactors
           })
         );
         return nextProfile.city;
@@ -235,7 +255,8 @@ export default function DashboardPage() {
           district: stored.district || stored.city || "",
           pincode: stored.pincode || "",
           avgDailyEarning: String(stored.avgEarning ?? 0),
-          rainThresholdMm: stored.threshold ?? 15
+          rainThresholdMm: stored.threshold ?? 15,
+          enabledFactors: normalizeEnabledFactors(stored.enabledFactors)
         };
         setProfile(nextProfile);
         setActiveCity(nextProfile.city);
@@ -818,7 +839,8 @@ export default function DashboardPage() {
                       district: profile.district || profile.city,
                       pincode: profile.pincode,
                       avgDailyEarning: Number(profile.avgDailyEarning) || 0,
-                      rainThresholdMm: Number(profile.rainThresholdMm) || 15
+                      rainThresholdMm: Number(profile.rainThresholdMm) || 15,
+                      enabledFactors: normalizeEnabledFactors(profile.enabledFactors)
                     });
                     localStorage.setItem(
                       "partnerProfile",
@@ -827,7 +849,8 @@ export default function DashboardPage() {
                         district: profile.district || profile.city,
                         pincode: profile.pincode,
                         avgEarning: Number(profile.avgDailyEarning) || 0,
-                        threshold: Number(profile.rainThresholdMm) || 15
+                        threshold: Number(profile.rainThresholdMm) || 15,
+                        enabledFactors: normalizeEnabledFactors(profile.enabledFactors)
                       })
                     );
                     setActiveCity(profile.city || "");
@@ -922,6 +945,34 @@ export default function DashboardPage() {
                     value={profile.rainThresholdMm}
                     onChange={(e) => setProfile((p) => ({ ...p, rainThresholdMm: e.target.value }))}
                   />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small">Enabled disruption factors</label>
+                  <div className="d-flex flex-column gap-1">
+                    {FACTOR_OPTIONS.map((factor) => {
+                      const checked = normalizeEnabledFactors(profile.enabledFactors).includes(factor.key);
+                      return (
+                        <label key={factor.key} className="form-check-label small d-flex align-items-center gap-2">
+                          <input
+                            type="checkbox"
+                            className="form-check-input mt-0"
+                            checked={checked}
+                            onChange={(e) => {
+                              setProfile((prev) => {
+                                const current = normalizeEnabledFactors(prev.enabledFactors);
+                                if (e.target.checked) {
+                                  return { ...prev, enabledFactors: [...new Set([...current, factor.key])] };
+                                }
+                                const next = current.filter((item) => item !== factor.key);
+                                return { ...prev, enabledFactors: next.length > 0 ? next : current };
+                              });
+                            }}
+                          />
+                          <span>{factor.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <button className="btn btn-sm btn-primary w-100" type="submit" disabled={profileSaving}>
                   {profileSaving ? "Saving..." : "Save profile"}
