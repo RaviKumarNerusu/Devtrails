@@ -88,7 +88,7 @@ function evaluateFraudSignals({
   const weatherValid = (() => {
     switch (normalizedTriggerType) {
       case "heat":
-        return toNumber(temperature, 0) > toNumber(heatThreshold, 0);
+        return toNumber(temperature, 0) >= toNumber(heatThreshold, 38);
       case "pollution":
         return toNumber(aqi, 0) > toNumber(pollutionThreshold, 0);
       case "flood":
@@ -139,7 +139,7 @@ async function getFraudScore({
   isAutoTriggered = false,
   triggerType = "rain",
   temperature = 0,
-  heatThreshold = 40,
+  heatThreshold = 38,
   aqi = 0,
   pollutionThreshold = 150,
   floodThreshold = 0,

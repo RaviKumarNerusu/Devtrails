@@ -73,7 +73,7 @@ function resolveDisruptionTrigger({
     thresholds.rainfall_threshold ?? thresholds.rain_threshold ?? thresholds.threshold ?? thresholds.rainThreshold,
     0
   );
-  const heatThreshold = toNumber(thresholds.heat_threshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 40, 40);
+  const heatThreshold = toNumber(thresholds.heat_threshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 38, 38);
   const pollutionThreshold = toNumber(thresholds.pollution_threshold ?? process.env.TRIGGER_AQI_THRESHOLD ?? 150, 150);
   const floodThreshold = toNumber(
     thresholds.flood_threshold ?? Math.max(rainfallThreshold > 0 ? rainfallThreshold * 1.5 : 0, rainfallThreshold + 10),
@@ -88,7 +88,7 @@ function resolveDisruptionTrigger({
   if (floodThreshold > 0 && rainValue > floodThreshold) {
     matchedTriggers.push("flood");
   }
-  if (heatThreshold > 0 && temperatureValue > heatThreshold) {
+  if (heatThreshold > 0 && temperatureValue >= heatThreshold) {
     matchedTriggers.push("heat");
   }
   if (pollutionThreshold > 0 && aqiValue > pollutionThreshold) {

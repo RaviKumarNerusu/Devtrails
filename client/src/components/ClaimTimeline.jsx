@@ -17,8 +17,13 @@ export default function ClaimTimeline({ claim }) {
   return (
     <div className="d-flex flex-column gap-2">
       <Step label="Eligible" date={claim.createdAt || claim.date} active={Boolean(claim)} />
-      <Step label="Claimed" date={claim.claimedAt} active={Boolean(claim.claimedAt)} />
+      <Step
+        label="Requested"
+        date={claim.requestedAt || claim.claimedAt}
+        active={Boolean(claim.requestedAt || claim.claimedAt || String(claim.status || "").toLowerCase() === "pending_approval")}
+      />
       <Step label="Approved" date={claim.approvedAt} active={Boolean(claim.approvedAt)} />
+      <Step label="Paid" date={claim.paidAt} active={Boolean(claim.paidAt || String(claim.status || "").toLowerCase() === "paid")} />
     </div>
   );
 }

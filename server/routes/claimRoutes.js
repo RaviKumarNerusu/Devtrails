@@ -5,6 +5,7 @@ const {
   autoClaim,
   listMyClaims,
   redeemClaim,
+  requestClaim,
   getClaimDetails,
   getClaimStats,
   listAllClaims
@@ -21,6 +22,9 @@ router.post("/auto", protect.required, rateLimiterClaimAuto, autoClaim);
 
 // Redeem eligible claim manually
 router.post("/redeem", protect.required, redeemClaim);
+
+// Request an eligible claim for admin approval
+router.post("/request", protect.required, requestClaim);
 
 // Get user's claim history
 router.get("/my", protect.required, listMyClaims);

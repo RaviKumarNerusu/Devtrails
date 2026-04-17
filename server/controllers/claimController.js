@@ -2,6 +2,7 @@ const Claim = require("../models/Claim");
 const {
   evaluateClaimEligibility,
   redeemEligibleClaim,
+  requestClaimForApproval,
   listClaimsForUser,
   listClaimsForInsurer,
   isClaimEligibleStatus
@@ -136,13 +137,23 @@ async function listMyClaims(req, res, next) {
  */
 async function redeemClaim(req, res, next) {
   try {
-    const claimId = req.body?.claimId || req.params?.claimId || null;
+    const claimId = req.body?.claimId || req.body?.claim_id || req.params?.claimId || null;
 
     if (claimId && !Types.ObjectId.isValid(claimId)) {
       const err = new Error("Invalid claim id");
       err.statusCode = 400;
       err.errorCode = "INVALID_CLAIM_ID";
       throw err;
+    }
+
+    if (claimId) {
+      const currentClaim = await Claim.findOne({ _id: claimId, userId: req.user._id }).select("requiresAdminReview").lean();
+      if (currentClaim?.requiresAdminReview) {
+        const err = new Error("Claim is pending manual review.");
+        err.statusCode = 409;
+        err.errorCode = "MANUAL_REVIEW_REQUIRED";
+        throw err;
+      }
     }
 
     const claim = await redeemEligibleClaim(req.user, claimId);
@@ -152,7 +163,7 @@ async function redeemClaim(req, res, next) {
       eligible: isClaimEligibleStatus(claim.status),
       status: claim.status,
       data: { claim: normalizeClaimPayload(claim) },
-      message: "Claim redeemed and approved successfully"
+      message: "Claim sent for admin approval successfully"
     });
   } catch (err) {
     logger.error("Failed to redeem claim", {
@@ -162,6 +173,35 @@ async function redeemClaim(req, res, next) {
     });
     err.statusCode = err.statusCode || 500;
     err.errorCode = err.errorCode || "CLAIM_REDEEM_FAILED";
+    next(err);
+  }
+}
+
+/**
+ * Worker: request claim for admin approval
+ * POST /api/claim/request
+ */
+async function requestClaim(req, res, next) {
+  try {
+    const claimId = req.body?.claimId || req.body?.claim_id || null;
+    const claim = await requestClaimForApproval(req.user, claimId);
+
+    return res.json({
+      success: true,
+      claim: normalizeClaimPayload(claim),
+      status: claim.status,
+      data: { claim: normalizeClaimPayload(claim) },
+      message: "Claim requested successfully"
+    });
+  } catch (err) {
+    logger.error("Failed to request claim", {
+      userId: req.user?._id?.toString(),
+      claimId: req.body?.claimId || req.body?.claim_id,
+      error: err.message,
+      errorCode: err.errorCode
+    });
+    err.statusCode = err.statusCode || 500;
+    err.errorCode = err.errorCode || "CLAIM_REQUEST_FAILED";
     next(err);
   }
 }
@@ -336,6 +376,14 @@ async function approveClaimByAdmin(req, res, next) {
       }
 
       const currentStatus = String(claim.status || "").toLowerCase();
+
+      if (currentStatus === "paid") {
+        const err = new Error("Claim is already paid");
+        err.statusCode = 409;
+        err.errorCode = "CLAIM_ALREADY_PAID";
+        throw err;
+      }
+
       if (currentStatus === "approved") {
         const err = new Error("Claim is already approved");
         err.statusCode = 409;
@@ -347,6 +395,14 @@ async function approveClaimByAdmin(req, res, next) {
         const err = new Error("Rejected claim cannot be approved");
         err.statusCode = 409;
         err.errorCode = "CLAIM_ALREADY_REJECTED";
+        throw err;
+      }
+
+      const approvableStatuses = new Set(["pending_approval", "eligible", "claimed"]);
+      if (!approvableStatuses.has(currentStatus)) {
+        const err = new Error("Only pending claims can be approved");
+        err.statusCode = 409;
+        err.errorCode = "CLAIM_NOT_PENDING_APPROVAL";
         throw err;
       }
 
@@ -368,6 +424,12 @@ async function approveClaimByAdmin(req, res, next) {
       });
       await claim.save({ session });
 
+      logger.info("Admin approved claim", {
+        adminId: req.user?._id?.toString(),
+        claimId: String(claim._id),
+        userId: String(claim.userId)
+      });
+
       if (Number(claim.payoutAmount || 0) > 0 && !claim.paidAt) {
         await simulateClaimPayout({
           claimId: claim._id,
@@ -376,6 +438,24 @@ async function approveClaimByAdmin(req, res, next) {
           session
         });
       }
+
+      claim.status = "paid";
+      claim.paidAt = claim.paidAt || new Date();
+      claim.auditLogs.push({
+        action: "CLAIM_PAID",
+        timestamp: new Date(),
+        details: {
+          adminId: String(req.user._id),
+          payoutAmount: Number(claim.payoutAmount || 0)
+        }
+      });
+      await claim.save({ session });
+
+      logger.info("Payout processed", {
+        claimId: String(claim._id),
+        userId: String(claim.userId),
+        payoutAmount: Number(claim.payoutAmount || 0)
+      });
 
       return claim;
     });
@@ -445,6 +525,21 @@ async function rejectClaimByAdmin(req, res, next) {
       throw err;
     }
 
+    if (currentStatus === "paid") {
+      const err = new Error("Paid claim cannot be rejected");
+      err.statusCode = 409;
+      err.errorCode = "CLAIM_ALREADY_PAID";
+      throw err;
+    }
+
+    const rejectableStatuses = new Set(["pending_approval", "eligible", "claimed"]);
+    if (!rejectableStatuses.has(currentStatus)) {
+      const err = new Error("Only pending claims can be rejected");
+      err.statusCode = 409;
+      err.errorCode = "CLAIM_NOT_PENDING_APPROVAL";
+      throw err;
+    }
+
     claim.status = "rejected";
     claim.requiresAdminReview = false;
     claim.adminDecision = "rejected";
@@ -493,6 +588,7 @@ module.exports = {
   autoClaim,
   listMyClaims,
   redeemClaim,
+  requestClaim,
   getClaimDetails,
   getClaimStats,
   listAllClaims,

@@ -35,7 +35,7 @@ const claimSchema = new mongoose.Schema(
     decision_reason: { type: String, trim: true, default: "" },
     status: {
       type: String,
-      enum: ["not_eligible", "eligible", "claimed", "approved", "rejected"],
+      enum: ["not_eligible", "eligible", "pending_approval", "approved", "rejected", "paid", "claimed"],
       default: "not_eligible"
     },
     claimedAt: { type: Date, default: null },

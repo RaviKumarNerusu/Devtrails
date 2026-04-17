@@ -18,12 +18,12 @@ const {
 const { executeInTransaction } = require("../utils/transactionHelper");
 const logger = require("../utils/logger");
 
-const TERMINAL_STATUSES = new Set(["claimed", "approved", "rejected"]);
-const CLAIMED_FLOW_STATUSES = new Set(["eligible", "claimed", "approved"]);
+const TERMINAL_STATUSES = new Set(["pending_approval", "approved", "rejected", "paid", "claimed"]);
+const CLAIMED_FLOW_STATUSES = new Set(["eligible", "pending_approval", "approved", "paid", "claimed"]);
 
 function normalizeStatus(value) {
   const status = String(value || "").toLowerCase();
-  return ["not_eligible", "eligible", "claimed", "approved", "rejected"].includes(status)
+  return ["not_eligible", "eligible", "pending_approval", "approved", "rejected", "paid", "claimed"].includes(status)
     ? status
     : "not_eligible";
 }
@@ -68,7 +68,7 @@ function resolveClaimTriggerContext({
     thresholdUsed.rainfall_threshold ?? threshold ?? process.env.TRIGGER_RAIN_THRESHOLD ?? 15,
     15
   );
-  const heatThreshold = toNumber(thresholdUsed.heat_threshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 40, 40);
+  const heatThreshold = toNumber(thresholdUsed.heat_threshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 38, 38);
   const pollutionThreshold = toNumber(thresholdUsed.pollution_threshold ?? process.env.TRIGGER_AQI_THRESHOLD ?? 150, 150);
   const floodThreshold = toNumber(
     thresholdUsed.flood_threshold ?? Math.max(rainfallThreshold > 0 ? rainfallThreshold * 1.5 : 0, rainfallThreshold + 10),
@@ -78,7 +78,7 @@ function resolveClaimTriggerContext({
   let eligible = false;
   switch (normalizedTriggerType) {
     case "heat":
-      eligible = toNumber(temperature, 0) > heatThreshold;
+      eligible = toNumber(temperature, 0) >= heatThreshold;
       break;
     case "pollution":
       eligible = toNumber(aqi, 0) > pollutionThreshold;
@@ -114,6 +114,28 @@ function resolveClaimTriggerContext({
   };
 }
 
+function calculateHeatIncomeImpactPayout(temperature, avgDailyEarning) {
+  const temp = Number(temperature || 0);
+  const earning = Math.max(0, Number(avgDailyEarning || 0));
+  if (!Number.isFinite(temp) || !Number.isFinite(earning) || earning <= 0) {
+    return { payoutAmount: 0, impactLevel: "none", impactRatio: 0 };
+  }
+
+  if (temp > 45) {
+    return { payoutAmount: earning, impactLevel: "extreme", impactRatio: 1 };
+  }
+
+  if (temp >= 42) {
+    return { payoutAmount: earning * 0.6, impactLevel: "severe", impactRatio: 0.6 };
+  }
+
+  if (temp >= 38) {
+    return { payoutAmount: earning * 0.3, impactLevel: "moderate", impactRatio: 0.3 };
+  }
+
+  return { payoutAmount: 0, impactLevel: "none", impactRatio: 0 };
+}
+
 function deriveConfidenceDecision(riskScore, fraudScore, eligible) {
   const confidenceScore = clamp01(Number(riskScore) * (1 - clamp01(Number(fraudScore))));
 
@@ -146,9 +168,9 @@ function deriveConfidenceDecision(riskScore, fraudScore, eligible) {
 
   return {
     confidence_score: confidenceScore,
-    forceStatus: "rejected",
-    requiresAdminReview: false,
-    decision_reason: "auto_reject_low_confidence"
+    forceStatus: "eligible",
+    requiresAdminReview: true,
+    decision_reason: "manual_review_required_low_confidence"
   };
 }
 
@@ -392,13 +414,27 @@ async function evaluateClaimEligibility(user, options = {}) {
   });
 
   const confidence = deriveConfidenceDecision(riskScore, fraudResult.fraud_score, eligible);
+  if (eligible && Number(fraudResult.fraud_score || 0) >= 0.7) {
+    confidence.forceStatus = "pending_approval";
+    confidence.requiresAdminReview = true;
+    confidence.decision_reason = "high_fraud_pending_admin_review";
+  }
+
   const weeklyPremium = calculatePremium(riskScore);
+
+  const heatImpact = calculateHeatIncomeImpactPayout(temperature, profile?.avgDailyEarning || 0);
+  const payoutAmount = triggerContext.trigger_type === "heat" ? Number(heatImpact.payoutAmount || 0) : 0;
+  const maxPayoutAmount = triggerContext.trigger_type === "heat" ? Number(profile?.avgDailyEarning || 0) : 0;
 
   console.log("Fraud Score:", fraudResult.fraud_score);
   console.log("Fraud Reason:", fraudResult.fraud_reason);
   console.log("Confidence:", confidence.confidence_score);
   console.log("Threshold:", threshold);
   console.log("Premium:", weeklyPremium);
+  if (triggerContext.trigger_type === "heat") {
+    console.log("Heat Trigger:", temperature);
+    console.log("Heat Claim Triggered");
+  }
 
   await Promise.all([
     User.findByIdAndUpdate(user._id, { $set: { riskScore: riskScore, risk_score: riskScore } }),
@@ -419,9 +455,9 @@ async function evaluateClaimEligibility(user, options = {}) {
     threshold,
     riskLevel: eligible ? "HIGH" : "LOW",
     eligible,
-    amount: 0,
-    payoutAmount: 0,
-    maxPayoutAmount: 0,
+    amount: payoutAmount,
+    payoutAmount,
+    maxPayoutAmount,
     autoTriggered: true,
     triggerType: options?.triggerType || "rain",
     riskScore,
@@ -484,45 +520,7 @@ async function evaluateClaimEligibility(user, options = {}) {
   };
 }
 
-async function approveAndPayoutClaim(userId, claim) {
-  if (!claim || claim.status !== "eligible" || claim.requiresAdminReview || Number(claim.confidence_score || 0) <= 0.6) {
-    return claim;
-  }
-
-  const approvedAt = new Date();
-  const approvedClaim = await Claim.findByIdAndUpdate(
-    claim._id,
-    {
-      $set: {
-        status: "approved",
-        approvedAt
-      },
-      $push: {
-        auditLogs: buildAuditEntry("CLAIM_AUTO_APPROVED", {
-          approvedAt,
-          source: "trigger-engine"
-        })
-      }
-    },
-    { new: true }
-  );
-
-  await simulateClaimPayout({
-    claimId: approvedClaim._id,
-    userId,
-    payoutAmount: approvedClaim.payoutAmount
-  });
-
-  await logAudit("PAYOUT_PROCESSED", userId, {
-    claimId: String(approvedClaim._id),
-    payoutAmount: Number(approvedClaim.payoutAmount || 0),
-    status: approvedClaim.status
-  });
-
-  return approvedClaim;
-}
-
-async function redeemEligibleClaim(user, claimId = null) {
+async function requestClaimForApproval(user, claimId = null) {
   const profile = await PartnerProfile.findOne({ userId: user._id }).lean().catch(() => null);
   if (profile?.city) {
     await getActivePolicyOrThrow(user._id, profile);
@@ -530,34 +528,36 @@ async function redeemEligibleClaim(user, claimId = null) {
 
   const query = {
     userId: user._id,
-    status: "eligible",
-    requiresAdminReview: { $ne: true }
+    status: "eligible"
   };
 
   if (claimId) {
     const reviewedClaim = await Claim.findOne({ _id: claimId, userId: user._id }).select("requiresAdminReview status").lean();
-    if (reviewedClaim?.requiresAdminReview) {
-      const err = new Error("Claim is pending manual review.");
+    if (normalizeStatus(reviewedClaim?.status) === "pending_approval") {
+      const err = new Error("Claim is already pending admin approval.");
       err.statusCode = 409;
-      err.errorCode = "MANUAL_REVIEW_REQUIRED";
+      err.errorCode = "CLAIM_ALREADY_PENDING";
       throw err;
     }
     query._id = claimId;
   }
 
-  const approvedClaim = await executeInTransaction(async (session) => {
-    const claimedAt = new Date();
+  const requestedClaim = await executeInTransaction(async (session) => {
+    const requestedAt = new Date();
     const claim = await Claim.findOneAndUpdate(
       query,
       {
         $set: {
-          status: "claimed",
-          claimedAt
+          status: "pending_approval",
+          requiresAdminReview: true,
+          adminReviewReason: "worker_requested_claim",
+          requestedAt
         },
         $push: {
-          auditLogs: buildAuditEntry("CLAIM_REDEEMED", {
+          auditLogs: buildAuditEntry("CLAIM_REQUESTED", {
             claimId,
-            claimedAt
+            requestedAt,
+            source: "worker"
           })
         }
       },
@@ -569,48 +569,36 @@ async function redeemEligibleClaim(user, claimId = null) {
     );
 
     if (!claim) {
-      const err = new Error(claimId ? "Claim is not eligible for redemption." : "No eligible claim found to redeem.");
+      const err = new Error(claimId ? "Claim is not eligible for request." : "No eligible claim found to request.");
       err.statusCode = 404;
-      err.errorCode = claimId ? "CLAIM_NOT_REDEEMABLE" : "NO_ELIGIBLE_CLAIM";
+      err.errorCode = claimId ? "CLAIM_NOT_REQUESTABLE" : "NO_ELIGIBLE_CLAIM";
       throw err;
     }
 
-    const approvedAt = new Date();
-    const approvedClaim = await Claim.findByIdAndUpdate(
-      claim._id,
-      {
-        $set: {
-          status: "approved",
-          approvedAt
-        },
-        $push: {
-          auditLogs: buildAuditEntry("CLAIM_APPROVED", {
-            approvedAt
-          })
-        }
-      },
-      { new: true, session }
-    );
-
-    await simulateClaimPayout({
-      claimId: approvedClaim._id,
-      userId: user._id,
-      payoutAmount: approvedClaim.payoutAmount,
-      session
-    });
-
-    return approvedClaim;
+    return claim;
   });
 
-  logger.info("Claim redeemed and approved", {
+  logger.info("Claim requested by user", {
     userId: user._id.toString(),
-    rain: approvedClaim.rainMm,
-    threshold: approvedClaim.threshold,
-    decision: "REDEEMED",
-    status: approvedClaim.status
+    claimId: String(requestedClaim._id),
+    status: requestedClaim.status
   });
 
-  return approvedClaim;
+  logger.info("Sent to admin approval", {
+    userId: user._id.toString(),
+    claimId: String(requestedClaim._id)
+  });
+
+  await logAudit("CLAIM_REQUESTED", user._id, {
+    claimId: String(requestedClaim._id),
+    status: requestedClaim.status
+  });
+
+  return requestedClaim;
+}
+
+async function redeemEligibleClaim(user, claimId = null) {
+  return requestClaimForApproval(user, claimId);
 }
 
 async function createAutoTriggeredClaim(user, triggerType = "rain", options = {}) {
@@ -624,11 +612,6 @@ async function createAutoTriggeredClaim(user, triggerType = "rain", options = {}
   }
 
   if (result.claim.status === "eligible") {
-    result.claim = await approveAndPayoutClaim(user._id, result.claim);
-    result.status = result.claim.status;
-  }
-
-  if (result.claim.status === "approved") {
     result.eligible = true;
   }
 
@@ -718,6 +701,7 @@ module.exports = {
   resolveClaimTriggerContext,
   evaluateClaimEligibility,
   createAutoTriggeredClaim,
+  requestClaimForApproval,
   redeemEligibleClaim,
   listClaimsForUser,
   listClaimsForInsurer

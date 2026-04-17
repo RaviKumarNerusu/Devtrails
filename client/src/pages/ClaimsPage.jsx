@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { autoCreateClaim, getAllClaims, getMyClaims, redeemClaimNow } from "../services/claimService.js";
+import { autoCreateClaim, getAllClaims, getMyClaims, requestClaimApproval } from "../services/claimService.js";
 import { getPolicyByUserId } from "../services/policyService.js";
 import { useAuth } from "../authContext.jsx";
 import ClaimTimeline from "../components/ClaimTimeline.jsx";
@@ -25,7 +25,7 @@ export default function ClaimsPage() {
   const [claims, setClaims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
-  const [redeeming, setRedeeming] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState("");
   const [policyActive, setPolicyActive] = useState(false);
 
@@ -94,20 +94,20 @@ export default function ClaimsPage() {
     }
   };
 
-  const handleRedeem = async () => {
-    setRedeeming(true);
+  const handleRequestClaim = async () => {
+    setRequesting(true);
     setError("");
     try {
       if (!policyActive) {
         setError("No active policy. Take policy to recover payout.");
         return;
       }
-      await redeemClaimNow(eligibleClaim?._id || null);
+      await requestClaimApproval(eligibleClaim?._id || null);
       await loadClaims(true);
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || "Failed to redeem claim");
+      setError(err?.response?.data?.message || err.message || "Failed to request claim");
     } finally {
-      setRedeeming(false);
+      setRequesting(false);
     }
   };
 
@@ -115,7 +115,9 @@ export default function ClaimsPage() {
 
   function statusBadgeClass(status) {
     const key = String(status || "").toLowerCase();
+    if (key === "paid") return "text-bg-success";
     if (key === "approved") return "text-bg-success";
+    if (key === "pending_approval") return "text-bg-primary";
     if (key === "claimed") return "text-bg-primary";
     if (key === "eligible") return "text-bg-warning";
     if (key === "not_eligible") return "text-bg-secondary";
@@ -127,8 +129,10 @@ export default function ClaimsPage() {
     const key = String(status || "eligible").toLowerCase();
     if (key === "eligible") return "🟡 eligible";
     if (key === "not_eligible") return "⚪ not eligible";
+    if (key === "pending_approval") return "🔵 pending approval";
     if (key === "claimed") return "🔵 claimed";
     if (key === "approved") return "🟢 approved";
+    if (key === "paid") return "💸 paid";
     if (key === "rejected") return "🔴 rejected";
     return key;
   }
@@ -136,9 +140,10 @@ export default function ClaimsPage() {
   if (loading) return <div>Loading claims...</div>;
 
   const totalClaims = claims.length;
-  const approvedClaims = claims.filter((c) => String(c.status || "").toLowerCase() === "approved").length;
+  const approvedClaims = claims.filter((c) => ["approved", "paid"].includes(String(c.status || "").toLowerCase())).length;
   const pendingReviewClaims = claims.filter((c) => Boolean(c.requiresAdminReview)).length;
   const totalPayout = claims.reduce((sum, c) => sum + Number(c?.payout_amount ?? c?.payoutAmount ?? c?.amount ?? 0), 0);
+  const pendingClaim = claims.find((c) => String(c.status || "").toLowerCase() === "pending_approval");
 
   return (
     <div className="claims-page">
@@ -195,12 +200,16 @@ export default function ClaimsPage() {
           <div>
             <div className="fw-semibold">Claim Available!</div>
             <div className="small">
-              Rain exceeded threshold in {eligibleClaim.city || "your city"}.
+              Trigger conditions matched in {eligibleClaim.city || "your city"}. Request admin approval to process payout.
             </div>
           </div>
-          <button className="btn btn-success" onClick={handleRedeem} disabled={redeeming}>
-            {redeeming ? "Claiming..." : "Claim Now"}
+          <button className="btn btn-success" onClick={handleRequestClaim} disabled={requesting}>
+            {requesting ? "Requesting..." : "Request Claim"}
           </button>
+        </div>
+      ) : !isAdminView && policyActive && pendingClaim ? (
+        <div className="alert alert-info claims-neutral-alert" role="alert">
+          Claim is waiting for admin approval.
         </div>
       ) : !isAdminView && policyActive ? (
         <div className="alert alert-secondary claims-neutral-alert" role="alert">

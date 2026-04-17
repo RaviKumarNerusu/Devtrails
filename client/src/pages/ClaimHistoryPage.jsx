@@ -13,7 +13,9 @@ export default function ClaimHistoryPage() {
 
   function statusBadgeClass(status) {
     const key = String(status || "").toLowerCase();
+    if (key === "paid") return "text-bg-success";
     if (key === "approved") return "text-bg-success";
+    if (key === "pending_approval") return "text-bg-primary";
     if (key === "claimed") return "text-bg-primary";
     if (key === "eligible") return "text-bg-warning";
     if (key === "not_eligible") return "text-bg-secondary";
@@ -25,8 +27,10 @@ export default function ClaimHistoryPage() {
     const key = String(status || "eligible").toLowerCase();
     if (key === "eligible") return "🟡 eligible";
     if (key === "not_eligible") return "⚪ not eligible";
+    if (key === "pending_approval") return "🔵 pending approval";
     if (key === "claimed") return "🔵 claimed";
     if (key === "approved") return "🟢 approved";
+    if (key === "paid") return "💸 paid";
     if (key === "rejected") return "🔴 rejected";
     return key;
   }
@@ -86,14 +90,15 @@ export default function ClaimHistoryPage() {
   return (
     <div>
       <h2 className="mb-2">Claim history</h2>
-      <p className="text-muted mb-4">Track claim lifecycle: not eligible, eligible, claimed, approved, and rejected.</p>
+      <p className="text-muted mb-4">Track claim lifecycle: not eligible, eligible, pending approval, approved, paid, and rejected.</p>
       <div className="d-flex flex-wrap gap-2 mb-3">
         {[
           ["all", "All"],
           ["not_eligible", "Not eligible"],
           ["eligible", "Eligible"],
-          ["claimed", "Claimed"],
+          ["pending_approval", "Pending"],
           ["approved", "Approved"],
+          ["paid", "Paid"],
           ["rejected", "Rejected"]
         ].map(([key, label]) => (
           <button

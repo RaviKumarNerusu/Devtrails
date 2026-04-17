@@ -23,10 +23,31 @@ function claimStatusLabel(claim) {
   const amount = Number(claim?.payoutAmount ?? claim?.amount ?? 0);
 
   if (status === "eligible") return amount > 0 ? `Eligible for Rs ${amount.toFixed(0)}` : "Eligible today";
+  if (status === "pending_approval") return "Pending admin approval";
   if (status === "claimed") return "Claimed";
   if (status === "approved") return "Approved";
+  if (status === "paid") return "Paid";
   if (status === "rejected") return "Rejected";
   return "Not Eligible Today";
+}
+
+function getIncomeImpactLabel(todayComp, todayClaim) {
+  const triggerType = String(todayClaim?.trigger_type || todayClaim?.triggerType || "").toLowerCase();
+  if (triggerType !== "heat") {
+    const risk = String(todayComp?.riskLevel || "").toUpperCase();
+    if (risk === "SEVERE") return "Severe";
+    if (risk === "HIGH" || risk === "MEDIUM") return "Moderate";
+    return "Low";
+  }
+
+  const payout = Number(todayClaim?.payout_amount ?? todayClaim?.payoutAmount ?? todayClaim?.amount ?? 0);
+  const avgEarning = Number(todayComp?.avgDailyEarning || 0);
+  const ratio = avgEarning > 0 ? payout / avgEarning : 0;
+
+  if (ratio >= 1) return "Extreme";
+  if (ratio >= 0.6) return "Severe";
+  if (ratio >= 0.3) return "Moderate";
+  return "Low";
 }
 
 const CITY_DIRECTORY = [
@@ -516,7 +537,7 @@ export default function DashboardPage() {
     <div className="row">
       <div className="col-lg-8">
         <div className="d-flex justify-content-between align-items-center mb-1">
-          <h2 className="mb-0">Rain Compensation Dashboard</h2>
+          <h2 className="mb-0">All Factors Compensation Dashboard</h2>
           <div className="d-flex flex-wrap gap-2">
             <Link to="/plans" className="btn btn-sm btn-outline-primary">
               View plans
@@ -568,6 +589,12 @@ export default function DashboardPage() {
                   Risk: <strong>{todayComp.riskLevel || "UNKNOWN"}</strong> · Threshold:{" "}
                   {todayComp.rainThresholdMm} mm
                 </p>
+                {todayClaim ? (
+                  <p className="mb-0 text-muted small mt-1">
+                    Disruption: {String(todayClaim?.trigger_type || todayClaim?.triggerType || "rain").toLowerCase() === "heat" ? "Heat 🌡" : "Rain 🌧"}
+                    {" "}· Income Impact: <strong>{getIncomeImpactLabel(todayComp, todayClaim)}</strong>
+                  </p>
+                ) : null}
                 {todayComp?.hasPolicy && todayClaim ? <div className="mt-2 small fw-semibold">{claimStatusLabel(todayClaim)}</div> : null}
               </div>
               <div className="text-end">
@@ -642,7 +669,11 @@ export default function DashboardPage() {
           <div className="alert alert-success d-flex justify-content-between align-items-center">
             <div>
               <div className="fw-semibold">Claim Available!</div>
-              <div className="small">Rain exceeded threshold. You can claim this daily record now.</div>
+              <div className="small">
+                {String(todayClaim?.trigger_type || todayClaim?.triggerType || "").toLowerCase() === "heat"
+                  ? "Heat exceeded threshold. You can claim this daily record now."
+                  : "Rain exceeded threshold. You can claim this daily record now."}
+              </div>
             </div>
             <Link to="/claims" className="btn btn-sm btn-success">
               Claim Now

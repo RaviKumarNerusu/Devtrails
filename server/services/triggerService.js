@@ -41,7 +41,7 @@ function buildThresholdBundle(weather = {}) {
     weather?.threshold ?? weather?.rainThreshold ?? process.env.TRIGGER_RAIN_THRESHOLD ?? 15,
     15
   );
-  const heatThreshold = toNumber(weather?.heatThreshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 35, 35);
+  const heatThreshold = toNumber(weather?.heatThreshold ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 38, 38);
   const pollutionThreshold = toNumber(weather?.pollutionThreshold ?? process.env.TRIGGER_AQI_THRESHOLD ?? 150, 150);
   const floodThreshold = toNumber(weather?.floodThreshold ?? Math.max(rainfallThreshold * 1.5, rainfallThreshold + 10), rainfallThreshold);
 
@@ -81,6 +81,17 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   });
   let triggerType = disruption.trigger_type || null;
   let shouldCreateClaim = Boolean(triggerType);
+
+  const heatThreshold = Number(thresholds?.heat_threshold ?? 38);
+  if (!demoOverride && Number(temperature) >= heatThreshold) {
+    triggerType = "heat";
+    shouldCreateClaim = true;
+  }
+
+  if (triggerType === "heat") {
+    console.log("Heat Trigger:", temperature);
+    console.log("Heat Claim Triggered");
+  }
 
   if (demoOverride) {
     triggerType = "rain";
@@ -275,6 +286,16 @@ async function processHourlyParametricTriggers() {
 
       let triggerType = triggerDecision.trigger_type;
       let shouldCreateClaim = Boolean(triggerType);
+
+      if (!demoOverride && Number(temperature) >= Number(weatherData?.thresholds?.heat_threshold ?? 38)) {
+        triggerType = "heat";
+        shouldCreateClaim = true;
+      }
+
+      if (triggerType === "heat") {
+        console.log("Heat Trigger:", temperature);
+        console.log("Heat Claim Triggered");
+      }
 
       if (demoOverride) {
         triggerType = "rain";

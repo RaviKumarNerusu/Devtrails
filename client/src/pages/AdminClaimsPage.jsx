@@ -17,7 +17,7 @@ export default function AdminClaimsPage() {
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState("");
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("pending_approval");
   const [triggerFilter, setTriggerFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
@@ -54,7 +54,7 @@ export default function AdminClaimsPage() {
   const actionableClaims = useMemo(() => {
     return claims.filter((claim) => {
       const status = String(claim.status || "").toLowerCase();
-      return status === "eligible" || Boolean(claim.requiresAdminReview);
+      return status === "pending_approval";
     });
   }, [claims]);
 
@@ -100,7 +100,7 @@ export default function AdminClaimsPage() {
         String(item._id) === String(claimId)
           ? {
               ...item,
-              status: "approved",
+              status: "paid",
               requiresAdminReview: false,
               adminDecision: "approved"
             }
@@ -188,12 +188,11 @@ export default function AdminClaimsPage() {
                   setPage(1);
                 }}
               >
-                <option value="all">All statuses</option>
-                <option value="eligible">Eligible</option>
+                <option value="pending_approval">Pending</option>
                 <option value="approved">Approved</option>
+                <option value="paid">Paid</option>
                 <option value="rejected">Rejected</option>
-                <option value="not_eligible">Not eligible</option>
-                <option value="claimed">Claimed</option>
+                <option value="all">All statuses</option>
               </select>
             </div>
             <div className="col-md-4">
@@ -245,7 +244,7 @@ export default function AdminClaimsPage() {
                 pagedClaims.map((claim) => {
                   const claimId = String(claim._id || "");
                   const status = String(claim.status || "").toLowerCase();
-                  const canModerate = status === "eligible" || Boolean(claim.requiresAdminReview);
+                  const canModerate = ["pending_approval", "eligible", "claimed"].includes(status);
 
                   return (
                     <tr key={claimId} className={Number(claim.fraud_score || 0) >= 0.7 ? "table-danger" : ""}>

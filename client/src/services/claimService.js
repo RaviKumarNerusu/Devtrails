@@ -77,9 +77,18 @@ export async function rejectClaimByAdmin(claimId, reason = "") {
 }
 
 export async function redeemClaimNow(claimId = null) {
-  const payload = claimId ? { claimId } : {};
-  const { data } = await api.post("/claim/redeem", payload, { headers: authHeaders() });
+  const payload = claimId ? { claim_id: claimId, claimId } : {};
+  const { data } = await api.post("/claim/request", payload, { headers: authHeaders() });
   console.log("API response:", data);
+  return {
+    ...data,
+    claim: data?.claim ? normalizeClaim(data.claim) : null
+  };
+}
+
+export async function requestClaimApproval(claimId = null) {
+  const payload = claimId ? { claim_id: claimId, claimId } : {};
+  const { data } = await api.post("/claim/request", payload, { headers: authHeaders() });
   return {
     ...data,
     claim: data?.claim ? normalizeClaim(data.claim) : null
