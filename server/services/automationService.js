@@ -95,6 +95,7 @@ function calculateDynamicPayout(rainMm, threshold, baseAmount) {
 
 function calculateTriggeredPayout({
   triggerType,
+  triggerTypes = [],
   rainMm,
   rainThreshold,
   floodThreshold,
@@ -107,15 +108,36 @@ function calculateTriggeredPayout({
 }) {
   if (!baseAmount || baseAmount <= 0) return 0;
 
+  const activeTriggers = Array.isArray(triggerTypes) && triggerTypes.length > 0
+    ? [...new Set(triggerTypes)]
+    : [triggerType];
+
+  const severityWeights = {
+    rain: 0.4,
+    heat: 0.3,
+    pollution: 0.2,
+    flood: 0.6,
+    social: 0.5
+  };
+
+  const combinedRatio = Math.min(
+    1,
+    activeTriggers.reduce((sum, item) => sum + (severityWeights[item] || 0), 0)
+  );
+
+  if (combinedRatio > 0 && activeTriggers.length > 1) {
+    return baseAmount * combinedRatio;
+  }
+
   switch (triggerType) {
     case "heat":
-      return temperature > heatThreshold ? baseAmount : 0;
+      return temperature >= heatThreshold ? baseAmount * severityWeights.heat : 0;
     case "pollution":
-      return aqi > pollutionThreshold ? baseAmount : 0;
+      return aqi > pollutionThreshold ? baseAmount * severityWeights.pollution : 0;
     case "flood":
       return calculateDynamicPayout(rainMm, floodThreshold, baseAmount);
     case "social":
-      return socialEvent?.active ? baseAmount : 0;
+      return socialEvent?.active ? baseAmount * severityWeights.social : 0;
     case "rain":
     default:
       return calculateDynamicPayout(rainMm, rainThreshold, baseAmount);
@@ -231,7 +253,10 @@ async function runAutomationForUser(user) {
     location: city,
     activityDrop: false
   });
-  const triggerType = triggerResult.triggerType || "rain";
+  const triggerTypes = Array.isArray(triggerResult.triggerTypes) && triggerResult.triggerTypes.length > 0
+    ? triggerResult.triggerTypes
+    : (triggerResult.triggerType ? [triggerResult.triggerType] : []);
+  const triggerType = triggerTypes[0] || triggerResult.triggerType || "rain";
   const triggerThresholds = triggerResult.weatherData?.thresholds || {};
   const triggerSocialEvent = triggerResult.weatherData?.socialEvent || null;
 
@@ -257,6 +282,10 @@ async function runAutomationForUser(user) {
   const heatThreshold = Number(triggerThresholds.heat_threshold || weather.heatThreshold || process.env.TRIGGER_HEAT_THRESHOLD || 35);
   const pollutionThreshold = Number(triggerThresholds.pollution_threshold || process.env.TRIGGER_AQI_THRESHOLD || 150);
   const eligible = (() => {
+    if (triggerTypes.length > 0) {
+      return true;
+    }
+
     switch (triggerType) {
       case "heat":
         return temperature > heatThreshold;
@@ -275,6 +304,7 @@ async function runAutomationForUser(user) {
   const tieredPayout = eligible
     ? calculateTriggeredPayout({
         triggerType,
+        triggerTypes,
         rainMm,
         rainThreshold: threshold,
         floodThreshold,
@@ -299,7 +329,8 @@ async function runAutomationForUser(user) {
     payoutAmount: cappedPayout,
     maxPayoutAmount: CLAIM_CONFIG.MAX_PAYOUT_AMOUNT,
     autoTriggered: true,
-    triggerType
+    triggerType,
+    triggerTypes
   });
 
   if (eligible) {

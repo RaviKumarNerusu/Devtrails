@@ -2,6 +2,8 @@ const Payout = require("../models/Payout");
 const Policy = require("../models/Policy");
 const PartnerProfile = require("../models/PartnerProfile");
 const { fetchCurrentWeather } = require("./openWeatherService");
+const { runAutomationTriggers } = require("./triggerService");
+const { calculateTriggerPayout } = require("./claimService");
 const { calculateRisk, calculatePayout } = require("./payoutService");
 const { getLocalDateOnly } = require("../utils/claimValidator");
 const { extractRainSafely } = require("../utils/claimValidator");
@@ -27,10 +29,37 @@ async function buildTodayCompensation(user) {
   const currentWeather = await fetchCurrentWeather(targetCity);
 
   const rainMm = extractRainSafely(currentWeather, 1);
+  const temperature = Number(currentWeather?.main?.temp ?? currentWeather?.temperature ?? 0) || 0;
+  const aqi = Number(currentWeather?.main?.aqi ?? currentWeather?.aqi ?? 50) || 50;
   const rainThresholdMm = normalizeNonNegativeNumber(profile.rainThresholdMm);
   const avgDailyEarning = normalizeNonNegativeNumber(profile.avgDailyEarning);
 
   const riskLevel = calculateRisk(rainMm, rainThresholdMm);
+  const triggerResult = runAutomationTriggers({
+    weather: {
+      rainMm,
+      temperature,
+      aqi,
+      threshold: rainThresholdMm,
+      heatThreshold: Number(process.env.TRIGGER_HEAT_THRESHOLD || 38),
+      pollutionThreshold: Number(process.env.TRIGGER_AQI_THRESHOLD || 150),
+      floodThreshold: Math.max(rainThresholdMm * 1.5, rainThresholdMm + 10)
+    },
+    user,
+    location: targetCity,
+    activityDrop: false
+  });
+  const triggerTypes = Array.isArray(triggerResult.triggerTypes) ? triggerResult.triggerTypes : [];
+  const impact = calculateTriggerPayout({
+    triggerContext: {
+      trigger_type: triggerTypes[0] || triggerResult.triggerType || "rain",
+      trigger_types: triggerTypes
+    },
+    rainMm,
+    temperature,
+    aqi,
+    avgDailyEarning
+  });
 
   const activePolicy = await Policy.findOne({ userId: user._id, isActive: true }).sort({ createdAt: -1 }).lean();
   const hasPolicy = Boolean(activePolicy);
@@ -48,12 +77,15 @@ async function buildTodayCompensation(user) {
       rainThresholdMm,
       avgDailyEarning,
       payoutAmount: 0,
+      triggerTypes,
+      impactLevel: triggerTypes.length > 1 ? "severe" : triggerTypes.length === 1 ? "moderate" : "none",
+      impactLabel: triggerTypes.length > 0 ? triggerTypes.map((item) => item.charAt(0).toUpperCase() + item.slice(1)).join(" + ") : "None",
       triggered: false,
       status: "not_eligible"
     };
   }
 
-  const payoutAmount = calculatePayout(rainMm, rainThresholdMm, avgDailyEarning);
+  const payoutAmount = Math.max(calculatePayout(rainMm, rainThresholdMm, avgDailyEarning), impact.payoutAmount || 0);
 
   return {
     hasPolicy: true,
@@ -66,6 +98,9 @@ async function buildTodayCompensation(user) {
     avgDailyEarning,
     predictedLoss,
     payoutAmount,
+    triggerTypes,
+    impactLevel: triggerTypes.length > 1 ? "severe" : triggerTypes.length === 1 ? "moderate" : "none",
+    impactLabel: triggerTypes.length > 0 ? triggerTypes.map((item) => item.charAt(0).toUpperCase() + item.slice(1)).join(" + ") : "None",
     triggered: payoutAmount > 0,
     status: payoutAmount > 0 ? "approved" : "not triggered"
   };

@@ -116,9 +116,12 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   if (enabled.social && thresholds.social !== false && socialEvent?.active === true) matchedTriggerTypes.push("social");
 
   const dedupedTriggers = [...new Set(matchedTriggerTypes)];
-  let triggerType = dedupedTriggers[0] || null;
-  let triggerTypes = dedupedTriggers;
-  let shouldCreateClaim = triggerTypes.length > 0;
+  const detectedTriggers = dedupedTriggers;
+  let triggerType = detectedTriggers[0] || null;
+  let triggerTypes = detectedTriggers;
+  let shouldCreateClaim = detectedTriggers.length > 0;
+
+  console.log("Triggers detected:", detectedTriggers);
 
   if (triggerType === "heat" || triggerTypes.includes("heat")) {
     console.log("Heat Trigger:", temperature);
@@ -166,6 +169,7 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
     shouldCreateClaim,
     triggerType,
     triggerTypes,
+    detectedTriggers,
     trigger_type: triggerType,
     weatherData: {
       rainfall: rainMm,

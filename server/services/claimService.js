@@ -523,6 +523,7 @@ async function evaluateClaimEligibility(user, options = {}) {
     if (item === "pollution") return enabledFactorMap.aqi;
     return enabledFactorMap[item] !== false;
   });
+  console.log("Triggers detected:", matchedTriggerTypes);
   const primaryTriggerType = matchedTriggerTypes[0] || normalizeFactorName(options?.triggerType || triggerContext.trigger_type || "rain");
 
   if (matchedTriggerTypes.includes("rain")) {
@@ -685,7 +686,8 @@ async function evaluateClaimEligibility(user, options = {}) {
     threshold,
     decision: eligible ? "ELIGIBLE" : "NOT_ELIGIBLE",
     status: claim?.status || "none",
-    trigger_type: triggerContext.trigger_type
+    trigger_type: triggerContext.trigger_type,
+    trigger_types: matchedTriggerTypes
   });
 
   return {
