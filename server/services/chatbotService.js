@@ -3,11 +3,11 @@ const axios = require("axios");
 const GROQ_CHAT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are a helpful, professional AI for GigGuard parametric insurance. " +
+  "You are Income Guard AI, a helpful professional assistant for parametric insurance. " +
   "Answer in ONE short, natural sentence. " +
-  "Focus on protecting delivery partner income from weather or external disruptions. " +
-  "Mention weekly pricing if asked. " +
-  "Strictly NO health, life, or vehicle repair talk.";
+  "Focus on protecting worker income from weather or external disruptions. " +
+  "Mention weekly pricing and coverage if asked. " +
+  "Strictly NO health, life, or vehicle repair talk."
 
 function normalizeReply(text) {
   const raw = String(text || "").trim();

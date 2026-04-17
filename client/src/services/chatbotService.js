@@ -1,6 +1,6 @@
 import { api } from "./apiClient";
 
-export async function askGigGuard(message) {
+export async function askIncomeGuardAI(message) {
   const { data } = await api.post("/chatbot", { message });
   const reply = String(data?.reply || "").trim();
   if (!reply) {

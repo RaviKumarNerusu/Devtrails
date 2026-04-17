@@ -21,7 +21,7 @@ import AdminClaimsPage from "./pages/AdminClaimsPage.jsx";
 import AdminAnalyticsPage from "./pages/AdminAnalyticsPage.jsx";
 import AdminFraudPage from "./pages/AdminFraudPage.jsx";
 import AdminSupportPage from "./pages/AdminSupportPage.jsx";
-import GigGuardChatbot from "./components/GigGuardChatbot.jsx";
+import IncomeGuardAIChatbot from "./components/GigGuardChatbot.jsx";
 
 function normalizeRole(role) {
   return String(role || "").toLowerCase();
@@ -355,7 +355,7 @@ export default function App() {
   return (
     <AuthProvider>
       <Shell />
-      <GigGuardChatbot />
+      <IncomeGuardAIChatbot />
     </AuthProvider>
   );
 }

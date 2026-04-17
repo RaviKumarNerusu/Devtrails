@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { askGigGuard } from "../services/chatbotService";
+import { askIncomeGuardAI } from "../services/chatbotService";
 
 function makeMessage(role, text) {
   return {
@@ -10,13 +10,13 @@ function makeMessage(role, text) {
   };
 }
 
-export default function GigGuardChatbot() {
+export default function IncomeGuardAIChatbot() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState(() => [
-    makeMessage("bot", "Hello! How can I help protect your earnings this week?")
+    makeMessage("bot", "Hi! I'm Income Guard AI. How can I help protect your earnings?")
   ]);
 
   const hideWidget = useMemo(() => location.pathname.startsWith("/admin"), [location.pathname]);
@@ -39,7 +39,7 @@ export default function GigGuardChatbot() {
     setIsSending(true);
 
     try {
-      const reply = await askGigGuard(text);
+      const reply = await askIncomeGuardAI(text);
       setMessages((prev) => [...prev, makeMessage("bot", reply)]);
     } catch (error) {
       setMessages((prev) => [...prev, makeMessage("bot", "Service unavailable right now. Please try again shortly.")]);
@@ -214,9 +214,9 @@ export default function GigGuardChatbot() {
       </button>
 
       {open ? (
-        <section className="gg-chat-window" aria-label="GigGuard chatbot">
+        <section className="gg-chat-window" aria-label="Income Guard AI chatbot">
           <header className="gg-chat-header">
-            <span>GigGuard Support</span>
+            <span>Income Guard AI</span>
             <button type="button" className="gg-chat-close" onClick={toggleChat} aria-label="Close chatbot">
               ×
             </button>
