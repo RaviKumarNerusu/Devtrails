@@ -6,7 +6,7 @@ const { fetchCurrentWeather } = require("./openWeatherService");
 const { getRiskScore } = require("./mlService");
 const { getFraudScore } = require("./fraudService");
 const { calculatePremium } = require("../utils/premiumCalculator");
-const { simulateClaimPayout } = require("./payoutService");
+const { calculatePayout } = require("./payoutService");
 const { logAudit } = require("./auditLogService");
 const { normalizeTriggerType, toNumber } = require("../utils/disruptionRules");
 const {
@@ -134,6 +134,65 @@ function calculateHeatIncomeImpactPayout(temperature, avgDailyEarning) {
   }
 
   return { payoutAmount: 0, impactLevel: "none", impactRatio: 0 };
+}
+
+function clampPayout(value, cap) {
+  const payout = Math.max(0, Number(value || 0));
+  const max = Math.max(0, Number(cap || 0));
+  if (!Number.isFinite(payout) || !Number.isFinite(max) || max <= 0) return 0;
+  return Math.min(payout, max);
+}
+
+function calculateTriggerPayout({ triggerContext, rainMm, temperature, aqi, avgDailyEarning }) {
+  const earning = Math.max(0, Number(avgDailyEarning || 0));
+  if (!Number.isFinite(earning) || earning <= 0) {
+    return { payoutAmount: 0, maxPayoutAmount: 0 };
+  }
+
+  const triggerType = String(triggerContext?.trigger_type || triggerContext?.triggerType || "rain").toLowerCase();
+  const thresholds = triggerContext?.thresholds || {};
+
+  if (triggerType === "heat") {
+    const heatImpact = calculateHeatIncomeImpactPayout(temperature, earning);
+    return {
+      payoutAmount: clampPayout(heatImpact.payoutAmount, earning),
+      maxPayoutAmount: earning
+    };
+  }
+
+  if (triggerType === "flood") {
+    return {
+      payoutAmount: earning,
+      maxPayoutAmount: earning
+    };
+  }
+
+  if (triggerType === "pollution") {
+    const pollutionThreshold = Number(thresholds.pollution_threshold || 150);
+    const pollutionValue = Number(aqi || 0);
+    const exceedance = Math.max(0, pollutionValue - pollutionThreshold);
+    let ratio = 0.3;
+    if (exceedance >= 100) ratio = 0.7;
+    else if (exceedance >= 50) ratio = 0.5;
+
+    return {
+      payoutAmount: clampPayout(earning * ratio, earning),
+      maxPayoutAmount: earning
+    };
+  }
+
+  if (triggerType === "social") {
+    return {
+      payoutAmount: clampPayout(earning * 0.5, earning),
+      maxPayoutAmount: earning
+    };
+  }
+
+  const rainThreshold = Number(thresholds.rainfall_threshold || 0);
+  return {
+    payoutAmount: clampPayout(calculatePayout(rainMm, rainThreshold, earning), earning),
+    maxPayoutAmount: earning
+  };
 }
 
 function deriveConfidenceDecision(riskScore, fraudScore, eligible) {
@@ -422,9 +481,13 @@ async function evaluateClaimEligibility(user, options = {}) {
 
   const weeklyPremium = calculatePremium(riskScore);
 
-  const heatImpact = calculateHeatIncomeImpactPayout(temperature, profile?.avgDailyEarning || 0);
-  const payoutAmount = triggerContext.trigger_type === "heat" ? Number(heatImpact.payoutAmount || 0) : 0;
-  const maxPayoutAmount = triggerContext.trigger_type === "heat" ? Number(profile?.avgDailyEarning || 0) : 0;
+  const { payoutAmount, maxPayoutAmount } = calculateTriggerPayout({
+    triggerContext,
+    rainMm,
+    temperature,
+    aqi,
+    avgDailyEarning: profile?.avgDailyEarning || 0
+  });
 
   console.log("Fraud Score:", fraudResult.fraud_score);
   console.log("Fraud Reason:", fraudResult.fraud_reason);
@@ -699,6 +762,7 @@ module.exports = {
   getActivePolicyOrThrow,
   upsertDailyClaimRecord,
   resolveClaimTriggerContext,
+  calculateTriggerPayout,
   evaluateClaimEligibility,
   createAutoTriggeredClaim,
   requestClaimForApproval,

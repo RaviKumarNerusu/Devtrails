@@ -3,6 +3,7 @@ const assert = require("assert");
 const { buildMockSocialEvent, normalizeTriggerType, resolveDisruptionTrigger } = require("../utils/disruptionRules");
 const { evaluateFraudSignals } = require("../services/fraudService");
 const { calculatePredictionMetrics } = require("../controllers/dashboardController");
+const { calculateTriggerPayout } = require("../services/claimService");
 
 function buildClaims(createdAtOffsetsHours, triggerType = "rain") {
   return createdAtOffsetsHours.map((offsetHours) => ({
@@ -71,6 +72,65 @@ function main() {
     }
   });
   assert.strictEqual(socialTrigger.trigger_type, "social");
+
+  const earning = 1200;
+  const rainPayout = calculateTriggerPayout({
+    triggerContext: rainTrigger,
+    rainMm: 26,
+    temperature: 31,
+    aqi: 95,
+    avgDailyEarning: earning
+  });
+  assert.ok(rainPayout.payoutAmount > 0, "Rain trigger should produce payout");
+
+  const heatPayout = calculateTriggerPayout({
+    triggerContext: heatTrigger,
+    rainMm: 10,
+    temperature: 45,
+    aqi: 90,
+    avgDailyEarning: earning
+  });
+  assert.ok(heatPayout.payoutAmount > 0, "Heat trigger should produce payout");
+
+  const pollutionPayout = calculateTriggerPayout({
+    triggerContext: pollutionTrigger,
+    rainMm: 10,
+    temperature: 30,
+    aqi: 201,
+    avgDailyEarning: earning
+  });
+  assert.ok(pollutionPayout.payoutAmount > 0, "Pollution trigger should produce payout");
+
+  const floodTrigger = resolveDisruptionTrigger({
+    rainfall: 45,
+    temperature: 30,
+    aqi: 80,
+    thresholds: {
+      rainfall_threshold: 20,
+      heat_threshold: 40,
+      pollution_threshold: 150,
+      flood_threshold: 30
+    }
+  });
+  assert.strictEqual(floodTrigger.trigger_type, "flood");
+
+  const floodPayout = calculateTriggerPayout({
+    triggerContext: floodTrigger,
+    rainMm: 45,
+    temperature: 30,
+    aqi: 80,
+    avgDailyEarning: earning
+  });
+  assert.ok(floodPayout.payoutAmount > 0, "Flood trigger should produce payout");
+
+  const socialPayout = calculateTriggerPayout({
+    triggerContext: socialTrigger,
+    rainMm: 0,
+    temperature: 0,
+    aqi: 0,
+    avgDailyEarning: earning
+  });
+  assert.ok(socialPayout.payoutAmount > 0, "Social trigger should produce payout");
 
   const invalidFraud = evaluateFraudSignals({
     claims: buildClaims([1, 2, 3, 4, 5], "rain"),
