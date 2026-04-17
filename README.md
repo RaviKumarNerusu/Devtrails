@@ -60,7 +60,11 @@ When user has no active policy:
 4. Optional AI/ML add-on vars:
   - `ML_SERVICE_URL=https://devtrails-ml-service.onrender.com/predict`
   - `ML_SERVICE_TIMEOUT_MS=10000`
-5. Optional payment vars for Razorpay test mode:
+5. Optional chatbot vars (server only):
+  - `GROQ_API_KEY` (server secret key, never expose in client)
+  - `GROQ_MODEL=llama-3.3-70b-versatile`
+  - `GROQ_API_TIMEOUT_MS=15000`
+6. Optional payment vars for Razorpay test mode:
   - `RAZORPAY_KEY_ID` (server)
   - `RAZORPAY_KEY_SECRET` (server)
   - `VITE_RAZORPAY_KEY_ID` (client, same public key id)

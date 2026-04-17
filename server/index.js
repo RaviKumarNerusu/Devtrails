@@ -22,6 +22,7 @@ const triggerRoutes = require("./routes/triggerRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const chatbotRoutes = require("./routes/chatbotRoutes");
 const { startClaimAutomationScheduler } = require("./services/claimAutomationScheduler");
 const { startParametricTriggerEngine } = require("./services/triggerService");
 
@@ -50,6 +51,7 @@ app.use("/api/trigger", triggerRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/chatbot", chatbotRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

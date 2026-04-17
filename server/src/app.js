@@ -19,6 +19,7 @@ const triggerRoutes = require("../routes/triggerRoutes");
 const paymentRoutes = require("../routes/paymentRoutes");
 const dashboardRoutes = require("../routes/dashboardRoutes");
 const adminRoutes = require("../routes/adminRoutes");
+const chatbotRoutes = require("../routes/chatbotRoutes");
 
 function createApp() {
   const app = express();
@@ -56,6 +57,7 @@ function createApp() {
   app.use("/api/payment", paymentRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/admin", adminRoutes);
+  app.use("/api/chatbot", chatbotRoutes);
 
   /**
    * Error handling middleware (must be last)
