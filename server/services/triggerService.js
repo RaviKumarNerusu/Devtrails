@@ -12,6 +12,30 @@ const {
 } = require("../utils/disruptionRules");
 const logger = require("../utils/logger");
 
+function isDemoModeEnabled() {
+  const value = String(process.env.DEMO_MODE || "false").trim().toLowerCase();
+  return value === "true" || value === "1" || value === "yes" || value === "on";
+}
+
+function isDemoCity(city) {
+  return String(city || "").trim().toLowerCase() === "mysore";
+}
+
+function getDemoWeatherOverride(city) {
+  if (!isDemoModeEnabled() || !isDemoCity(city)) {
+    return null;
+  }
+
+  console.log("DEMO MODE ACTIVE: Mysore always raining");
+  return {
+    rainfall: 50,
+    temperature: 28,
+    aqi: 80,
+    AQI: 80,
+    condition: "Heavy Rain"
+  };
+}
+
 function buildThresholdBundle(weather = {}) {
   const rainfallThreshold = toNumber(
     weather?.threshold ?? weather?.rainThreshold ?? process.env.TRIGGER_RAIN_THRESHOLD ?? 15,
@@ -30,10 +54,22 @@ function buildThresholdBundle(weather = {}) {
 }
 
 function runAutomationTriggers({ weather, user, location, activityDrop }) {
-  const rainMm = Number(weather?.rainMm || 0);
-  const temperature = Number(weather?.temperature ?? weather?.temp ?? 0);
-  const aqi = Number(weather?.aqi ?? 0);
-  const thresholds = buildThresholdBundle(weather);
+  const demoOverride = getDemoWeatherOverride(location || weather?.city || user?.location);
+  const effectiveWeather = demoOverride
+    ? {
+      ...weather,
+      rainMm: demoOverride.rainfall,
+      temperature: demoOverride.temperature,
+      temp: demoOverride.temperature,
+      aqi: demoOverride.aqi,
+      condition: demoOverride.condition
+    }
+    : weather;
+
+  const rainMm = Number(effectiveWeather?.rainMm || 0);
+  const temperature = Number(effectiveWeather?.temperature ?? effectiveWeather?.temp ?? 0);
+  const aqi = Number(effectiveWeather?.aqi ?? 0);
+  const thresholds = buildThresholdBundle(effectiveWeather);
   const socialEvent = weather?.socialEvent || buildMockSocialEvent({ userId: user?._id, city: location });
 
   const disruption = resolveDisruptionTrigger({
@@ -43,7 +79,13 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
     thresholds,
     socialEvent
   });
-  const triggerType = disruption.trigger_type || null;
+  let triggerType = disruption.trigger_type || null;
+  let shouldCreateClaim = Boolean(triggerType);
+
+  if (demoOverride) {
+    triggerType = "rain";
+    shouldCreateClaim = true;
+  }
 
   const triggers = [];
   const legacyTriggers = [];
@@ -69,14 +111,14 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   legacyTriggers.push({ type: "location", hit: highRiskZone, premiumDelta: highRiskZone ? 30 : 0, claim: false, trigger_type: triggerType });
   legacyTriggers.push({ type: "event", hit: triggerType === "social" || userActivityDrop, premiumDelta: triggerType === "social" ? 10 : userActivityDrop ? 10 : 0, claim: triggerType === "social", trigger_type: triggerType });
 
-  const claimTrigger = Boolean(triggerType);
+  const claimTrigger = shouldCreateClaim;
   legacyTriggers.push({ type: "claim", hit: claimTrigger || highRiskZone || userActivityDrop, premiumDelta: 0, claim: claimTrigger, trigger_type: triggerType });
 
   return {
     triggers,
     legacyTriggers,
     premiumDelta: triggers.reduce((sum, t) => sum + (t.premiumDelta || 0), 0),
-    shouldCreateClaim: claimTrigger,
+    shouldCreateClaim,
     triggerType,
     trigger_type: triggerType,
     weatherData: {
@@ -172,14 +214,24 @@ async function processHourlyParametricTriggers() {
       const city = profile?.city || user.location;
       if (!city) continue;
 
-      const weather = await fetchCurrentWeather(city);
+      const demoOverride = getDemoWeatherOverride(city);
+      const weather = demoOverride
+        ? {
+          main: { temp: demoOverride.temperature },
+          rain: { "1h": demoOverride.rainfall },
+          weather: [{ main: demoOverride.condition }]
+        }
+        : await fetchCurrentWeather(city);
+
       if (!weather) {
         logger.warn("Trigger engine skipped due to missing weather data", { userId, city });
         continue;
       }
-      const rainfall = Number(weather?.rain?.["1h"] || weather?.rain?.["3h"] || 0) || 0;
-      const temperature = Number(weather?.main?.temp || 0) || 0;
-      const aqi = mockAqiFromWeather(weather);
+      const rainfall = demoOverride
+        ? Number(demoOverride.rainfall)
+        : Number(weather?.rain?.["1h"] || weather?.rain?.["3h"] || 0) || 0;
+      const temperature = demoOverride ? Number(demoOverride.temperature) : Number(weather?.main?.temp || 0) || 0;
+      const aqi = demoOverride ? Number(demoOverride.aqi) : mockAqiFromWeather(weather);
 
       const dynamicThresholds = await computeDynamicThresholds({
         userId,
@@ -221,9 +273,15 @@ async function processHourlyParametricTriggers() {
         weatherData
       });
 
-      const triggerType = triggerDecision.trigger_type;
+      let triggerType = triggerDecision.trigger_type;
+      let shouldCreateClaim = Boolean(triggerType);
 
-      if (!triggerType) {
+      if (demoOverride) {
+        triggerType = "rain";
+        shouldCreateClaim = true;
+      }
+
+      if (!shouldCreateClaim) {
         logger.debug("Trigger engine evaluated with no action", {
           userId,
           city,
