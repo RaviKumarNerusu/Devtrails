@@ -53,6 +53,29 @@ function buildThresholdBundle(weather = {}) {
   };
 }
 
+function getUserThresholdConfig(user = {}, profile = {}, fallback = {}) {
+  const thresholds = {
+    rain: toNumber(user?.thresholds?.rain ?? profile?.rainThresholdMm ?? fallback?.rain ?? process.env.TRIGGER_RAIN_THRESHOLD ?? 15, 15),
+    heat: toNumber(user?.thresholds?.heat ?? fallback?.heat ?? process.env.TRIGGER_HEAT_THRESHOLD ?? 38, 38),
+    aqi: toNumber(user?.thresholds?.aqi ?? fallback?.aqi ?? process.env.TRIGGER_AQI_THRESHOLD ?? 150, 150),
+    flood: toNumber(
+      user?.thresholds?.flood ?? fallback?.flood ?? Math.max((profile?.rainThresholdMm || 15) * 1.5, (profile?.rainThresholdMm || 15) + 10),
+      30
+    ),
+    social: typeof user?.thresholds?.social === "boolean" ? user.thresholds.social : true
+  };
+
+  const enabled = {
+    rain: user?.enabled_factors?.rain !== false,
+    heat: user?.enabled_factors?.heat !== false,
+    aqi: user?.enabled_factors?.aqi !== false,
+    flood: user?.enabled_factors?.flood !== false,
+    social: user?.enabled_factors?.social !== false
+  };
+
+  return { thresholds, enabled };
+}
+
 function runAutomationTriggers({ weather, user, location, activityDrop }) {
   const demoOverride = getDemoWeatherOverride(location || weather?.city || user?.location);
   const effectiveWeather = demoOverride
@@ -69,43 +92,54 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   const rainMm = Number(effectiveWeather?.rainMm || 0);
   const temperature = Number(effectiveWeather?.temperature ?? effectiveWeather?.temp ?? 0);
   const aqi = Number(effectiveWeather?.aqi ?? 0);
-  const thresholds = buildThresholdBundle(effectiveWeather);
+  const profileLike = { rainThresholdMm: effectiveWeather?.threshold };
+  const userConfig = getUserThresholdConfig(user, profileLike, {
+    rain: effectiveWeather?.threshold,
+    heat: effectiveWeather?.heatThreshold,
+    aqi: effectiveWeather?.pollutionThreshold,
+    flood: effectiveWeather?.floodThreshold
+  });
+  const thresholds = {
+    rainfall_threshold: userConfig.thresholds.rain,
+    heat_threshold: userConfig.thresholds.heat,
+    pollution_threshold: userConfig.thresholds.aqi,
+    flood_threshold: userConfig.thresholds.flood
+  };
+  const enabled = userConfig.enabled;
   const socialEvent = weather?.socialEvent || buildMockSocialEvent({ userId: user?._id, city: location });
 
-  const disruption = resolveDisruptionTrigger({
-    rainfall: rainMm,
-    temperature,
-    aqi,
-    thresholds,
-    socialEvent
-  });
-  let triggerType = disruption.trigger_type || null;
-  let shouldCreateClaim = Boolean(triggerType);
+  const matchedTriggerTypes = [];
+  if (enabled.rain && rainMm >= thresholds.rainfall_threshold) matchedTriggerTypes.push("rain");
+  if (enabled.heat && temperature >= thresholds.heat_threshold) matchedTriggerTypes.push("heat");
+  if (enabled.aqi && aqi >= thresholds.pollution_threshold) matchedTriggerTypes.push("pollution");
+  if (enabled.flood && rainMm >= thresholds.flood_threshold) matchedTriggerTypes.push("flood");
+  if (enabled.social && thresholds.social !== false && socialEvent?.active === true) matchedTriggerTypes.push("social");
 
-  const heatThreshold = Number(thresholds?.heat_threshold ?? 38);
-  if (!demoOverride && Number(temperature) >= heatThreshold) {
-    triggerType = "heat";
-    shouldCreateClaim = true;
-  }
+  const dedupedTriggers = [...new Set(matchedTriggerTypes)];
+  let triggerType = dedupedTriggers[0] || null;
+  let triggerTypes = dedupedTriggers;
+  let shouldCreateClaim = triggerTypes.length > 0;
 
-  if (triggerType === "heat") {
+  if (triggerType === "heat" || triggerTypes.includes("heat")) {
     console.log("Heat Trigger:", temperature);
     console.log("Heat Claim Triggered");
   }
 
   if (demoOverride) {
     triggerType = "rain";
+    triggerTypes = ["rain"];
     shouldCreateClaim = true;
   }
 
   const triggers = [];
   const legacyTriggers = [];
 
-  triggers.push({ type: "rain", hit: triggerType === "rain", premiumDelta: triggerType === "rain" ? 20 : 0, claim: triggerType === "rain" });
-  triggers.push({ type: "heat", hit: triggerType === "heat", premiumDelta: triggerType === "heat" ? 15 : 0, claim: triggerType === "heat" });
-  triggers.push({ type: "pollution", hit: triggerType === "pollution", premiumDelta: triggerType === "pollution" ? 15 : 0, claim: triggerType === "pollution" });
-  triggers.push({ type: "flood", hit: triggerType === "flood", premiumDelta: triggerType === "flood" ? 25 : 0, claim: triggerType === "flood" });
-  triggers.push({ type: "social", hit: triggerType === "social", premiumDelta: triggerType === "social" ? 10 : 0, claim: triggerType === "social" });
+  const hasTrigger = (name) => triggerTypes.includes(name);
+  triggers.push({ type: "rain", hit: hasTrigger("rain"), premiumDelta: hasTrigger("rain") ? 20 : 0, claim: hasTrigger("rain") });
+  triggers.push({ type: "heat", hit: hasTrigger("heat"), premiumDelta: hasTrigger("heat") ? 15 : 0, claim: hasTrigger("heat") });
+  triggers.push({ type: "pollution", hit: hasTrigger("pollution"), premiumDelta: hasTrigger("pollution") ? 15 : 0, claim: hasTrigger("pollution") });
+  triggers.push({ type: "flood", hit: hasTrigger("flood"), premiumDelta: hasTrigger("flood") ? 25 : 0, claim: hasTrigger("flood") });
+  triggers.push({ type: "social", hit: hasTrigger("social"), premiumDelta: hasTrigger("social") ? 10 : 0, claim: hasTrigger("social") });
 
   // Preserve legacy trigger labels for older screens while the new disruption model is adopted.
   const now = new Date();
@@ -117,10 +151,10 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
   );
   const userActivityDrop = activityDrop === true || Number(user?.safeDays || 0) <= 1;
 
-  legacyTriggers.push({ type: "weather", hit: triggerType === "rain", premiumDelta: triggerType === "rain" ? 20 : 0, claim: triggerType === "rain", trigger_type: triggerType });
-  legacyTriggers.push({ type: "time", hit: triggerType === "heat" || isNight, premiumDelta: triggerType === "heat" ? 15 : isNight ? 10 : 0, claim: triggerType === "heat", trigger_type: triggerType });
+  legacyTriggers.push({ type: "weather", hit: hasTrigger("rain"), premiumDelta: hasTrigger("rain") ? 20 : 0, claim: hasTrigger("rain"), trigger_type: triggerType });
+  legacyTriggers.push({ type: "time", hit: hasTrigger("heat") || isNight, premiumDelta: hasTrigger("heat") ? 15 : isNight ? 10 : 0, claim: hasTrigger("heat"), trigger_type: triggerType });
   legacyTriggers.push({ type: "location", hit: highRiskZone, premiumDelta: highRiskZone ? 30 : 0, claim: false, trigger_type: triggerType });
-  legacyTriggers.push({ type: "event", hit: triggerType === "social" || userActivityDrop, premiumDelta: triggerType === "social" ? 10 : userActivityDrop ? 10 : 0, claim: triggerType === "social", trigger_type: triggerType });
+  legacyTriggers.push({ type: "event", hit: hasTrigger("social") || userActivityDrop, premiumDelta: hasTrigger("social") ? 10 : userActivityDrop ? 10 : 0, claim: hasTrigger("social"), trigger_type: triggerType });
 
   const claimTrigger = shouldCreateClaim;
   legacyTriggers.push({ type: "claim", hit: claimTrigger || highRiskZone || userActivityDrop, premiumDelta: 0, claim: claimTrigger, trigger_type: triggerType });
@@ -131,12 +165,17 @@ function runAutomationTriggers({ weather, user, location, activityDrop }) {
     premiumDelta: triggers.reduce((sum, t) => sum + (t.premiumDelta || 0), 0),
     shouldCreateClaim,
     triggerType,
+    triggerTypes,
     trigger_type: triggerType,
     weatherData: {
       rainfall: rainMm,
       temperature,
       aqi,
-      thresholds,
+      thresholds: {
+        ...thresholds,
+        social_threshold: userConfig.thresholds.social
+      },
+      enabled_factors: enabled,
       socialEvent
     }
   };
@@ -247,14 +286,20 @@ async function processHourlyParametricTriggers() {
       const dynamicThresholds = await computeDynamicThresholds({
         userId,
         city,
-        fallbackRainThreshold: Number(profile?.rainThresholdMm || process.env.TRIGGER_RAIN_THRESHOLD || 15)
+        fallbackRainThreshold: Number(user?.thresholds?.rain || profile?.rainThresholdMm || process.env.TRIGGER_RAIN_THRESHOLD || 15)
       });
 
       const userRisk = Number(user?.risk_score ?? user?.riskScore ?? 0);
       const riskMultiplier = userRisk > 0.7 ? 0.9 : 1;
-      const rainThreshold = Number((dynamicThresholds.rainfallThreshold * riskMultiplier).toFixed(2));
-      const tempThreshold = Number((dynamicThresholds.temperatureThreshold * riskMultiplier).toFixed(2));
-      const floodThreshold = Number(Math.max(rainThreshold * 1.5, rainThreshold + 10).toFixed(2));
+      const userConfig = getUserThresholdConfig(user, profile, {
+        rain: dynamicThresholds.rainfallThreshold,
+        heat: dynamicThresholds.temperatureThreshold,
+        aqi: aqiThreshold,
+        flood: Math.max(dynamicThresholds.rainfallThreshold * 1.5, dynamicThresholds.rainfallThreshold + 10)
+      });
+      const rainThreshold = Number((userConfig.thresholds.rain * riskMultiplier).toFixed(2));
+      const tempThreshold = Number((userConfig.thresholds.heat * riskMultiplier).toFixed(2));
+      const floodThreshold = Number((userConfig.thresholds.flood * riskMultiplier).toFixed(2));
       const socialEvent = buildMockSocialEvent({ userId, city });
       const weatherData = {
         rainfall,
@@ -263,44 +308,41 @@ async function processHourlyParametricTriggers() {
         thresholds: {
           rainfall_threshold: rainThreshold,
           heat_threshold: tempThreshold,
-          pollution_threshold: aqiThreshold,
-          flood_threshold: floodThreshold
+          pollution_threshold: Number(userConfig.thresholds.aqi || aqiThreshold),
+          flood_threshold: floodThreshold,
+          social_threshold: userConfig.thresholds.social
         },
+        enabled_factors: userConfig.enabled,
         socialEvent
       };
 
-      const triggerDecision = resolveDisruptionTrigger({
-        rainfall,
-        temperature,
-        aqi,
-        thresholds: weatherData.thresholds,
-        socialEvent
+      const triggerDecision = runAutomationTriggers({
+        weather: {
+          rainMm: rainfall,
+          temperature,
+          aqi,
+          threshold: rainThreshold,
+          heatThreshold: tempThreshold,
+          pollutionThreshold: Number(userConfig.thresholds.aqi || aqiThreshold),
+          floodThreshold,
+          socialEvent
+        },
+        user,
+        location: city,
+        activityDrop: false
       });
 
       logger.info("Trigger evaluated", {
         userId,
         city,
         trigger_type: triggerDecision.trigger_type,
+        trigger_types: triggerDecision.triggerTypes,
         weatherData
       });
 
-      let triggerType = triggerDecision.trigger_type;
-      let shouldCreateClaim = Boolean(triggerType);
-
-      if (!demoOverride && Number(temperature) >= Number(weatherData?.thresholds?.heat_threshold ?? 38)) {
-        triggerType = "heat";
-        shouldCreateClaim = true;
-      }
-
-      if (triggerType === "heat") {
-        console.log("Heat Trigger:", temperature);
-        console.log("Heat Claim Triggered");
-      }
-
-      if (demoOverride) {
-        triggerType = "rain";
-        shouldCreateClaim = true;
-      }
+      const triggerType = triggerDecision.trigger_type;
+      const triggerTypes = triggerDecision.triggerTypes || (triggerType ? [triggerType] : []);
+      const shouldCreateClaim = Boolean(triggerType);
 
       if (!shouldCreateClaim) {
         logger.debug("Trigger engine evaluated with no action", {
@@ -316,13 +358,19 @@ async function processHourlyParametricTriggers() {
       await createAutoTriggeredClaim(user, triggerType, {
         dynamicThreshold: rainThreshold,
         currentWeather: weather,
-        weatherData,
+        weatherData: {
+          ...weatherData,
+          trigger_types: triggerTypes
+        },
         socialEvent,
+        triggerTypes,
         thresholdUsed: {
           rainfall_threshold: rainThreshold,
-          temperature_threshold: tempThreshold,
+          heat_threshold: tempThreshold,
           aqi_threshold: aqiThreshold,
           flood_threshold: floodThreshold,
+          social_threshold: userConfig.thresholds.social,
+          enabled_factors: userConfig.enabled,
           risk_multiplier: riskMultiplier,
           dynamic_details: dynamicThresholds.details
         }

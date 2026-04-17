@@ -8,7 +8,7 @@ const { getFraudScore } = require("./fraudService");
 const { calculatePremium } = require("../utils/premiumCalculator");
 const { calculatePayout } = require("./payoutService");
 const { logAudit } = require("./auditLogService");
-const { normalizeTriggerType, toNumber } = require("../utils/disruptionRules");
+const { normalizeTriggerType, toNumber, resolveDisruptionTrigger } = require("../utils/disruptionRules");
 const {
   extractRainSafely,
   getLocalDateOnly,
@@ -21,6 +21,27 @@ const logger = require("../utils/logger");
 const TERMINAL_STATUSES = new Set(["pending_approval", "approved", "rejected", "paid", "claimed"]);
 const CLAIMED_FLOW_STATUSES = new Set(["eligible", "pending_approval", "approved", "paid", "claimed"]);
 const SUPPORTED_FACTORS = new Set(["rain", "heat", "pollution", "flood", "social"]);
+const FACTOR_WEIGHTS = {
+  rain: 0.4,
+  heat: 0.3,
+  pollution: 0.2,
+  flood: 0.6,
+  social: 0.5
+};
+const DEFAULT_THRESHOLDS = {
+  rain: 15,
+  heat: 38,
+  aqi: 150,
+  flood: 30,
+  social: true
+};
+const DEFAULT_ENABLED_FACTORS = {
+  rain: true,
+  heat: true,
+  aqi: true,
+  flood: true,
+  social: true
+};
 
 function normalizeStatus(value) {
   const status = String(value || "").toLowerCase();
@@ -53,6 +74,57 @@ function clamp01(value) {
   if (n <= 0) return 0;
   if (n >= 1) return 1;
   return n;
+}
+
+function normalizeFactorName(value) {
+  const raw = String(value || "rain").trim().toLowerCase();
+  if (raw === "aqi") return "pollution";
+  if (raw === "weather") return "rain";
+  if (raw === "event") return "social";
+  return normalizeTriggerType(raw);
+}
+
+function normalizeTriggerList(value) {
+  const list = Array.isArray(value) ? value : [value];
+  const normalized = [...new Set(list.map((item) => normalizeFactorName(item)).filter((item) => SUPPORTED_FACTORS.has(item)))];
+  return normalized;
+}
+
+function normalizeThresholdConfig({ userThresholds = {}, profile = {}, thresholdUsed = {}, dynamicRain = null } = {}) {
+  const fallbackRain = Number.isFinite(Number(dynamicRain)) ? Number(dynamicRain) : Number(profile?.rainThresholdMm || DEFAULT_THRESHOLDS.rain);
+  return {
+    rain: toNumber(userThresholds?.rain ?? thresholdUsed?.rainfall_threshold ?? thresholdUsed?.threshold ?? fallbackRain, DEFAULT_THRESHOLDS.rain),
+    heat: toNumber(userThresholds?.heat ?? thresholdUsed?.heat_threshold ?? DEFAULT_THRESHOLDS.heat, DEFAULT_THRESHOLDS.heat),
+    aqi: toNumber(userThresholds?.aqi ?? thresholdUsed?.pollution_threshold ?? DEFAULT_THRESHOLDS.aqi, DEFAULT_THRESHOLDS.aqi),
+    flood: toNumber(
+      userThresholds?.flood ??
+        thresholdUsed?.flood_threshold ??
+        Math.max((thresholdUsed?.rainfall_threshold ?? fallbackRain) * 1.5, (thresholdUsed?.rainfall_threshold ?? fallbackRain) + 10),
+      DEFAULT_THRESHOLDS.flood
+    ),
+    social: typeof userThresholds?.social === "boolean" ? userThresholds.social : DEFAULT_THRESHOLDS.social
+  };
+}
+
+function normalizeEnabledFactorMap(userEnabledFactors = {}, enabledFactorsArray = null) {
+  if (Array.isArray(enabledFactorsArray)) {
+    const selected = normalizeTriggerList(enabledFactorsArray);
+    return {
+      rain: selected.includes("rain"),
+      heat: selected.includes("heat"),
+      aqi: selected.includes("pollution"),
+      flood: selected.includes("flood"),
+      social: selected.includes("social")
+    };
+  }
+
+  return {
+    rain: typeof userEnabledFactors?.rain === "boolean" ? userEnabledFactors.rain : DEFAULT_ENABLED_FACTORS.rain,
+    heat: typeof userEnabledFactors?.heat === "boolean" ? userEnabledFactors.heat : DEFAULT_ENABLED_FACTORS.heat,
+    aqi: typeof userEnabledFactors?.aqi === "boolean" ? userEnabledFactors.aqi : DEFAULT_ENABLED_FACTORS.aqi,
+    flood: typeof userEnabledFactors?.flood === "boolean" ? userEnabledFactors.flood : DEFAULT_ENABLED_FACTORS.flood,
+    social: typeof userEnabledFactors?.social === "boolean" ? userEnabledFactors.social : DEFAULT_ENABLED_FACTORS.social
+  };
 }
 
 function resolveClaimTriggerContext({
@@ -147,52 +219,34 @@ function clampPayout(value, cap) {
 function calculateTriggerPayout({ triggerContext, rainMm, temperature, aqi, avgDailyEarning }) {
   const earning = Math.max(0, Number(avgDailyEarning || 0));
   if (!Number.isFinite(earning) || earning <= 0) {
-    return { payoutAmount: 0, maxPayoutAmount: 0 };
+    return { payoutAmount: 0, maxPayoutAmount: 0, payoutRatio: 0, triggerWeights: {} };
   }
 
-  const triggerType = String(triggerContext?.trigger_type || triggerContext?.triggerType || "rain").toLowerCase();
-  const thresholds = triggerContext?.thresholds || {};
+  const triggerTypes = normalizeTriggerList(
+    Array.isArray(triggerContext?.trigger_types) && triggerContext.trigger_types.length > 0
+      ? triggerContext.trigger_types
+      : triggerContext?.trigger_type || triggerContext?.triggerType || "rain"
+  );
+  const triggerWeights = triggerTypes.reduce((acc, item) => {
+    acc[item] = FACTOR_WEIGHTS[item] || 0;
+    return acc;
+  }, {});
+  const totalRatio = Math.min(1, triggerTypes.reduce((sum, item) => sum + (FACTOR_WEIGHTS[item] || 0), 0));
 
-  if (triggerType === "heat") {
-    const heatImpact = calculateHeatIncomeImpactPayout(temperature, earning);
+  if (totalRatio <= 0) {
     return {
-      payoutAmount: clampPayout(heatImpact.payoutAmount, earning),
-      maxPayoutAmount: earning
+      payoutAmount: 0,
+      maxPayoutAmount: earning,
+      payoutRatio: 0,
+      triggerWeights
     };
   }
 
-  if (triggerType === "flood") {
-    return {
-      payoutAmount: earning,
-      maxPayoutAmount: earning
-    };
-  }
-
-  if (triggerType === "pollution") {
-    const pollutionThreshold = Number(thresholds.pollution_threshold || 150);
-    const pollutionValue = Number(aqi || 0);
-    const exceedance = Math.max(0, pollutionValue - pollutionThreshold);
-    let ratio = 0.3;
-    if (exceedance >= 100) ratio = 0.7;
-    else if (exceedance >= 50) ratio = 0.5;
-
-    return {
-      payoutAmount: clampPayout(earning * ratio, earning),
-      maxPayoutAmount: earning
-    };
-  }
-
-  if (triggerType === "social") {
-    return {
-      payoutAmount: clampPayout(earning * 0.5, earning),
-      maxPayoutAmount: earning
-    };
-  }
-
-  const rainThreshold = Number(thresholds.rainfall_threshold || 0);
   return {
-    payoutAmount: clampPayout(calculatePayout(rainMm, rainThreshold, earning), earning),
-    maxPayoutAmount: earning
+    payoutAmount: clampPayout(earning * totalRatio, earning),
+    maxPayoutAmount: earning,
+    payoutRatio: totalRatio,
+    triggerWeights
   };
 }
 
@@ -289,6 +343,8 @@ async function upsertDailyClaimRecord({
   maxPayoutAmount,
   autoTriggered = true,
   triggerType = "rain",
+  triggerTypes = [],
+  factorObservations = {},
   riskScore = 0,
   fraudScore = 0,
   mlFactors = {},
@@ -331,7 +387,9 @@ async function upsertDailyClaimRecord({
     maxPayoutAmount: Number.isFinite(Number(maxPayoutAmount)) ? Number(maxPayoutAmount) : 0,
     autoTriggered,
     triggerType,
-    trigger_type: triggerType,
+    trigger_type: triggerTypes.length > 1 ? triggerTypes : triggerType,
+    trigger_types: triggerTypes,
+    factor_observations: factorObservations,
     risk_score: Number.isFinite(Number(riskScore)) ? Number(riskScore) : 0,
     fraud_score: Number.isFinite(Number(fraudScore)) ? Number(fraudScore) : 0,
     ml_factors: mlFactors && typeof mlFactors === "object" ? mlFactors : {},
@@ -359,7 +417,9 @@ async function upsertDailyClaimRecord({
         maxPayoutAmount: Number.isFinite(Number(maxPayoutAmount)) ? Number(maxPayoutAmount) : 0,
         autoTriggered,
         triggerType,
-        trigger_type: triggerType,
+        trigger_type: triggerTypes.length > 1 ? triggerTypes : triggerType,
+        trigger_types: triggerTypes,
+        factor_observations: factorObservations,
         risk_score: Number.isFinite(Number(riskScore)) ? Number(riskScore) : 0,
         fraud_score: Number.isFinite(Number(fraudScore)) ? Number(fraudScore) : 0,
         ml_factors: mlFactors && typeof mlFactors === "object" ? mlFactors : {},
@@ -407,11 +467,18 @@ async function upsertDailyClaimRecord({
 
 async function evaluateClaimEligibility(user, options = {}) {
   const profile = await PartnerProfile.findOne({ userId: user._id }).lean();
+  const userConfig = await User.findById(user._id).select("thresholds enabled_factors").lean().catch(() => null);
   const city = validateUserProfile(user, profile);
   const policy = await getActivePolicyOrThrow(user._id, profile);
 
-  const profileThreshold = Number(profile?.rainThresholdMm || 15);
-  const threshold = Number(options?.dynamicThreshold ?? profileThreshold);
+  const thresholds = normalizeThresholdConfig({
+    userThresholds: userConfig?.thresholds || {},
+    profile,
+    thresholdUsed: options?.thresholdUsed || options?.weatherData?.thresholds || {},
+    dynamicRain: options?.dynamicThreshold
+  });
+  const threshold = Number(thresholds.rain);
+  const enabledFactorMap = normalizeEnabledFactorMap(userConfig?.enabled_factors || {}, profile?.enabledFactors || null);
 
   const currentWeather = options?.currentWeather || options?.weatherData || await fetchCurrentWeather(city);
   const rainMm = Number(options?.weatherData?.rainfall ?? extractRainSafely(currentWeather, 1));
@@ -428,19 +495,41 @@ async function evaluateClaimEligibility(user, options = {}) {
     aqi,
     socialEvent,
     threshold,
-    thresholdUsed: options?.thresholdUsed || options?.weatherData?.thresholds || {}
+    thresholdUsed: {
+      rainfall_threshold: thresholds.rain,
+      heat_threshold: thresholds.heat,
+      pollution_threshold: thresholds.aqi,
+      flood_threshold: thresholds.flood,
+      social_threshold: thresholds.social
+    }
   });
 
-  if (triggerContext.triggerType === "rain") {
+  const resolvedDisruption = resolveDisruptionTrigger({
+    rainfall: rainMm,
+    temperature,
+    aqi,
+    thresholds: {
+      rainfall_threshold: thresholds.rain,
+      heat_threshold: thresholds.heat,
+      pollution_threshold: thresholds.aqi,
+      flood_threshold: thresholds.flood
+    },
+    socialEvent
+  });
+
+  const explicitTriggerTypes = normalizeTriggerList(options?.triggerTypes || []);
+  const resolvedTriggers = explicitTriggerTypes.length > 0 ? explicitTriggerTypes : normalizeTriggerList(resolvedDisruption.matchedTriggers || []);
+  const matchedTriggerTypes = resolvedTriggers.filter((item) => {
+    if (item === "pollution") return enabledFactorMap.aqi;
+    return enabledFactorMap[item] !== false;
+  });
+  const primaryTriggerType = matchedTriggerTypes[0] || normalizeFactorName(options?.triggerType || triggerContext.trigger_type || "rain");
+
+  if (matchedTriggerTypes.includes("rain")) {
     validateWeatherData(rainMm, triggerContext.thresholds.rainfall_threshold);
   }
 
-  const enabledFactors = new Set(
-    Array.isArray(profile?.enabledFactors) && profile.enabledFactors.length > 0
-      ? profile.enabledFactors.map((item) => String(item || "").toLowerCase()).filter((item) => SUPPORTED_FACTORS.has(item))
-      : Array.from(SUPPORTED_FACTORS)
-  );
-  const eligible = triggerContext.eligible && enabledFactors.has(triggerContext.trigger_type);
+  const eligible = matchedTriggerTypes.length > 0;
 
   const pastClaims = await Claim.countDocuments({ userId: user._id });
   const mlInput = {
@@ -462,7 +551,7 @@ async function evaluateClaimEligibility(user, options = {}) {
     threshold,
     triggeredByWeather: eligible,
     isAutoTriggered: true,
-    triggerType: triggerContext.triggerType,
+    triggerType: primaryTriggerType,
     temperature,
     heatThreshold: triggerContext.thresholds.heat_threshold,
     aqi,
@@ -487,8 +576,12 @@ async function evaluateClaimEligibility(user, options = {}) {
 
   const weeklyPremium = calculatePremium(riskScore);
 
-  const { payoutAmount, maxPayoutAmount } = calculateTriggerPayout({
-    triggerContext,
+  const { payoutAmount, maxPayoutAmount, payoutRatio, triggerWeights } = calculateTriggerPayout({
+    triggerContext: {
+      ...triggerContext,
+      trigger_type: primaryTriggerType,
+      trigger_types: matchedTriggerTypes
+    },
     rainMm,
     temperature,
     aqi,
@@ -528,13 +621,32 @@ async function evaluateClaimEligibility(user, options = {}) {
     payoutAmount,
     maxPayoutAmount,
     autoTriggered: true,
-    triggerType: options?.triggerType || "rain",
+    triggerType: primaryTriggerType,
+    triggerTypes: matchedTriggerTypes,
+    factorObservations: {
+      rainMm,
+      temperature,
+      aqi,
+      socialEventActive: Boolean(socialEvent?.active),
+      payoutRatio,
+      triggerWeights,
+      enabled_factors: enabledFactorMap,
+      thresholds
+    },
     riskScore,
     fraudScore: fraudResult.fraud_score,
     fraudReason: fraudResult.fraud_reason,
     mlFactors,
     modelVersion,
-    thresholdUsed: options?.thresholdUsed || options?.weatherData?.thresholds || { rainfall_threshold: threshold },
+    thresholdUsed: {
+      ...(options?.thresholdUsed || options?.weatherData?.thresholds || {}),
+      rainfall_threshold: thresholds.rain,
+      heat_threshold: thresholds.heat,
+      pollution_threshold: thresholds.aqi,
+      flood_threshold: thresholds.flood,
+      social_threshold: thresholds.social,
+      enabled_factors: enabledFactorMap
+    },
     confidenceScore: confidence.confidence_score,
     decisionReason: confidence.decision_reason,
     requiresAdminReview: confidence.requiresAdminReview,
@@ -552,7 +664,8 @@ async function evaluateClaimEligibility(user, options = {}) {
     confidence: confidence.confidence_score,
     status: claim?.status || null,
     decisionReason: confidence.decision_reason,
-    trigger_type: claim?.trigger_type || triggerContext.trigger_type,
+    trigger_type: claim?.trigger_type || primaryTriggerType,
+    trigger_types: matchedTriggerTypes,
     modelVersion
   });
 
@@ -561,7 +674,8 @@ async function evaluateClaimEligibility(user, options = {}) {
     fraudScore: fraudResult.fraud_score,
     shouldReject: fraudResult.should_reject,
     reasons: fraudResult.reasons,
-    trigger_type: triggerContext.trigger_type
+    trigger_type: primaryTriggerType,
+    trigger_types: matchedTriggerTypes
   });
 
   logger.info("Claim eligibility evaluated", {
@@ -672,9 +786,11 @@ async function redeemEligibleClaim(user, claimId = null) {
 
 async function createAutoTriggeredClaim(user, triggerType = "rain", options = {}) {
   const normalizedTriggerType = normalizeTriggerType(triggerType);
+  const normalizedTriggerTypes = normalizeTriggerList(options?.triggerTypes || [normalizedTriggerType]);
   const result = await evaluateClaimEligibility(user, {
     ...options,
-    triggerType: normalizedTriggerType
+    triggerType: normalizedTriggerType,
+    triggerTypes: normalizedTriggerTypes
   });
   if (!result?.claim) {
     return result;
@@ -684,18 +800,26 @@ async function createAutoTriggeredClaim(user, triggerType = "rain", options = {}
     result.eligible = true;
   }
 
-  if (normalizedTriggerType && result.claim.trigger_type !== normalizedTriggerType) {
+  const currentTriggers = normalizeTriggerList(result.claim.trigger_types || result.claim.trigger_type || []);
+  if (normalizedTriggerTypes.length > 0 && JSON.stringify(currentTriggers) !== JSON.stringify(normalizedTriggerTypes)) {
     result.claim = await Claim.findByIdAndUpdate(
       result.claim._id,
-      { $set: { triggerType: normalizedTriggerType, trigger_type: normalizedTriggerType } },
+      {
+        $set: {
+          triggerType: normalizedTriggerTypes[0] || normalizedTriggerType,
+          trigger_type: normalizedTriggerTypes.length > 1 ? normalizedTriggerTypes : normalizedTriggerTypes[0] || normalizedTriggerType,
+          trigger_types: normalizedTriggerTypes
+        }
+      },
       { new: true }
     );
   }
 
   logger.info("Auto claim processed", {
     userId: user._id.toString(),
-    triggerType: normalizedTriggerType,
-    trigger_type: normalizedTriggerType,
+    triggerType: normalizedTriggerTypes[0] || normalizedTriggerType,
+    trigger_type: normalizedTriggerTypes.length > 1 ? normalizedTriggerTypes : normalizedTriggerTypes[0] || normalizedTriggerType,
+    trigger_types: normalizedTriggerTypes,
     claimStatus: result.claim.status,
     payoutAmount: result.claim.payoutAmount,
     riskScore: result.claim.risk_score,

@@ -31,18 +31,29 @@ function claimStatusLabel(claim) {
   return "Not Eligible Today";
 }
 
-function getIncomeImpactLabel(todayComp, todayClaim) {
-  const triggerType = String(todayClaim?.trigger_type || todayClaim?.triggerType || "").toLowerCase();
-  if (triggerType !== "heat") {
-    const risk = String(todayComp?.riskLevel || "").toUpperCase();
-    if (risk === "SEVERE") return "Severe";
-    if (risk === "HIGH" || risk === "MEDIUM") return "Moderate";
-    return "Low";
-  }
+function getTriggerList(claim) {
+  const raw = claim?.trigger_types ?? claim?.trigger_type ?? claim?.triggerType ?? [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return [...new Set(list.map((item) => String(item || "").toLowerCase()).filter(Boolean))];
+}
 
+function getTriggerLabel(claim) {
+  const labels = {
+    rain: "Rain",
+    heat: "Heat",
+    pollution: "Pollution",
+    flood: "Flood",
+    social: "Social"
+  };
+  const names = getTriggerList(claim).map((item) => labels[item] || item.toUpperCase());
+  return names.length > 0 ? names.join(" + ") : "None";
+}
+
+function getIncomeImpactLabel(todayComp, todayClaim) {
+  const payoutRatioFromClaim = Number(todayClaim?.factor_observations?.payoutRatio ?? 0);
   const payout = Number(todayClaim?.payout_amount ?? todayClaim?.payoutAmount ?? todayClaim?.amount ?? 0);
   const avgEarning = Number(todayComp?.avgDailyEarning || 0);
-  const ratio = avgEarning > 0 ? payout / avgEarning : 0;
+  const ratio = payoutRatioFromClaim > 0 ? payoutRatioFromClaim : avgEarning > 0 ? payout / avgEarning : 0;
 
   if (ratio >= 1) return "Extreme";
   if (ratio >= 0.6) return "Severe";
@@ -126,6 +137,13 @@ const FACTOR_OPTIONS = [
   { key: "social", label: "Social disruptions" }
 ];
 const DEFAULT_ENABLED_FACTORS = FACTOR_OPTIONS.map((item) => item.key);
+const DEFAULT_THRESHOLDS = {
+  rain: 15,
+  heat: 38,
+  aqi: 150,
+  flood: 30,
+  social: true
+};
 
 function normalizeEnabledFactors(value) {
   if (!Array.isArray(value)) return DEFAULT_ENABLED_FACTORS;
@@ -153,7 +171,8 @@ export default function DashboardPage() {
     pincode: "",
     avgDailyEarning: "",
     rainThresholdMm: 15,
-    enabledFactors: DEFAULT_ENABLED_FACTORS
+    enabledFactors: DEFAULT_ENABLED_FACTORS,
+    thresholds: DEFAULT_THRESHOLDS
   });
   const [profileSaving, setProfileSaving] = useState(false);
   const [todayComp, setTodayComp] = useState(null);
@@ -225,7 +244,14 @@ export default function DashboardPage() {
           pincode: data.profile.pincode || "",
           avgDailyEarning: data.profile.avgDailyEarning?.toString() || "",
           rainThresholdMm: data.profile.rainThresholdMm || 15,
-          enabledFactors: normalizeEnabledFactors(data.profile.enabledFactors)
+          enabledFactors: normalizeEnabledFactors(data.profile.enabledFactors),
+          thresholds: {
+            rain: Number(data.profile?.thresholds?.rain ?? data.profile.rainThresholdMm ?? DEFAULT_THRESHOLDS.rain),
+            heat: Number(data.profile?.thresholds?.heat ?? DEFAULT_THRESHOLDS.heat),
+            aqi: Number(data.profile?.thresholds?.aqi ?? DEFAULT_THRESHOLDS.aqi),
+            flood: Number(data.profile?.thresholds?.flood ?? DEFAULT_THRESHOLDS.flood),
+            social: typeof data.profile?.thresholds?.social === "boolean" ? data.profile.thresholds.social : DEFAULT_THRESHOLDS.social
+          }
         };
         setProfile(nextProfile);
         setActiveCity(nextProfile.city);
@@ -238,7 +264,8 @@ export default function DashboardPage() {
             pincode: nextProfile.pincode,
             avgEarning: Number(nextProfile.avgDailyEarning) || 0,
             threshold: Number(nextProfile.rainThresholdMm) || 15,
-            enabledFactors: nextProfile.enabledFactors
+            enabledFactors: nextProfile.enabledFactors,
+            thresholds: nextProfile.thresholds
           })
         );
         return nextProfile.city;
@@ -256,7 +283,14 @@ export default function DashboardPage() {
           pincode: stored.pincode || "",
           avgDailyEarning: String(stored.avgEarning ?? 0),
           rainThresholdMm: stored.threshold ?? 15,
-          enabledFactors: normalizeEnabledFactors(stored.enabledFactors)
+          enabledFactors: normalizeEnabledFactors(stored.enabledFactors),
+          thresholds: {
+            rain: Number(stored?.thresholds?.rain ?? stored.threshold ?? DEFAULT_THRESHOLDS.rain),
+            heat: Number(stored?.thresholds?.heat ?? DEFAULT_THRESHOLDS.heat),
+            aqi: Number(stored?.thresholds?.aqi ?? DEFAULT_THRESHOLDS.aqi),
+            flood: Number(stored?.thresholds?.flood ?? DEFAULT_THRESHOLDS.flood),
+            social: typeof stored?.thresholds?.social === "boolean" ? stored.thresholds.social : DEFAULT_THRESHOLDS.social
+          }
         };
         setProfile(nextProfile);
         setActiveCity(nextProfile.city);
@@ -612,7 +646,7 @@ export default function DashboardPage() {
                 </p>
                 {todayClaim ? (
                   <p className="mb-0 text-muted small mt-1">
-                    Disruption: {String(todayClaim?.trigger_type || todayClaim?.triggerType || "rain").toLowerCase() === "heat" ? "Heat 🌡" : "Rain 🌧"}
+                    Disruption: {getTriggerLabel(todayClaim)}
                     {" "}· Income Impact: <strong>{getIncomeImpactLabel(todayComp, todayClaim)}</strong>
                   </p>
                 ) : null}
@@ -691,9 +725,7 @@ export default function DashboardPage() {
             <div>
               <div className="fw-semibold">Claim Available!</div>
               <div className="small">
-                {String(todayClaim?.trigger_type || todayClaim?.triggerType || "").toLowerCase() === "heat"
-                  ? "Heat exceeded threshold. You can claim this daily record now."
-                  : "Rain exceeded threshold. You can claim this daily record now."}
+                {getTriggerLabel(todayClaim)} exceeded configured thresholds. You can claim this daily record now.
               </div>
             </div>
             <Link to="/claims" className="btn btn-sm btn-success">
@@ -840,7 +872,21 @@ export default function DashboardPage() {
                       pincode: profile.pincode,
                       avgDailyEarning: Number(profile.avgDailyEarning) || 0,
                       rainThresholdMm: Number(profile.rainThresholdMm) || 15,
-                      enabledFactors: normalizeEnabledFactors(profile.enabledFactors)
+                      enabledFactors: normalizeEnabledFactors(profile.enabledFactors),
+                      thresholds: {
+                        rain: Number(profile.rainThresholdMm) || DEFAULT_THRESHOLDS.rain,
+                        heat: Number(profile?.thresholds?.heat) || DEFAULT_THRESHOLDS.heat,
+                        aqi: Number(profile?.thresholds?.aqi) || DEFAULT_THRESHOLDS.aqi,
+                        flood: Number(profile?.thresholds?.flood) || DEFAULT_THRESHOLDS.flood,
+                        social: profile?.thresholds?.social !== false
+                      },
+                      enabled_factors: {
+                        rain: normalizeEnabledFactors(profile.enabledFactors).includes("rain"),
+                        heat: normalizeEnabledFactors(profile.enabledFactors).includes("heat"),
+                        aqi: normalizeEnabledFactors(profile.enabledFactors).includes("pollution"),
+                        flood: normalizeEnabledFactors(profile.enabledFactors).includes("flood"),
+                        social: normalizeEnabledFactors(profile.enabledFactors).includes("social")
+                      }
                     });
                     localStorage.setItem(
                       "partnerProfile",
@@ -850,7 +896,14 @@ export default function DashboardPage() {
                         pincode: profile.pincode,
                         avgEarning: Number(profile.avgDailyEarning) || 0,
                         threshold: Number(profile.rainThresholdMm) || 15,
-                        enabledFactors: normalizeEnabledFactors(profile.enabledFactors)
+                        enabledFactors: normalizeEnabledFactors(profile.enabledFactors),
+                        thresholds: {
+                          rain: Number(profile.rainThresholdMm) || DEFAULT_THRESHOLDS.rain,
+                          heat: Number(profile?.thresholds?.heat) || DEFAULT_THRESHOLDS.heat,
+                          aqi: Number(profile?.thresholds?.aqi) || DEFAULT_THRESHOLDS.aqi,
+                          flood: Number(profile?.thresholds?.flood) || DEFAULT_THRESHOLDS.flood,
+                          social: profile?.thresholds?.social !== false
+                        }
                       })
                     );
                     setActiveCity(profile.city || "");
@@ -943,7 +996,67 @@ export default function DashboardPage() {
                     type="number"
                     className="form-control form-control-sm"
                     value={profile.rainThresholdMm}
-                    onChange={(e) => setProfile((p) => ({ ...p, rainThresholdMm: e.target.value }))}
+                    onChange={(e) =>
+                      setProfile((p) => ({
+                        ...p,
+                        rainThresholdMm: e.target.value,
+                        thresholds: {
+                          ...(p.thresholds || DEFAULT_THRESHOLDS),
+                          rain: Number(e.target.value) || DEFAULT_THRESHOLDS.rain
+                        }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small">Heat threshold (°C)</label>
+                  <input
+                    type="number"
+                    className="form-control form-control-sm"
+                    value={profile?.thresholds?.heat ?? DEFAULT_THRESHOLDS.heat}
+                    onChange={(e) =>
+                      setProfile((p) => ({
+                        ...p,
+                        thresholds: {
+                          ...(p.thresholds || DEFAULT_THRESHOLDS),
+                          heat: Number(e.target.value) || DEFAULT_THRESHOLDS.heat
+                        }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small">AQI threshold</label>
+                  <input
+                    type="number"
+                    className="form-control form-control-sm"
+                    value={profile?.thresholds?.aqi ?? DEFAULT_THRESHOLDS.aqi}
+                    onChange={(e) =>
+                      setProfile((p) => ({
+                        ...p,
+                        thresholds: {
+                          ...(p.thresholds || DEFAULT_THRESHOLDS),
+                          aqi: Number(e.target.value) || DEFAULT_THRESHOLDS.aqi
+                        }
+                      }))
+                    }
+                  />
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small">Flood threshold</label>
+                  <input
+                    type="number"
+                    className="form-control form-control-sm"
+                    value={profile?.thresholds?.flood ?? DEFAULT_THRESHOLDS.flood}
+                    onChange={(e) =>
+                      setProfile((p) => ({
+                        ...p,
+                        thresholds: {
+                          ...(p.thresholds || DEFAULT_THRESHOLDS),
+                          flood: Number(e.target.value) || DEFAULT_THRESHOLDS.flood
+                        }
+                      }))
+                    }
                   />
                 </div>
                 <div className="mb-2">

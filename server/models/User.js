@@ -25,7 +25,23 @@ const userSchema = new mongoose.Schema(
     
     // Admin review flag
     requiresAdminReview: { type: Boolean, default: false },
-    adminReviewReason: { type: String, trim: true, default: "" }
+    adminReviewReason: { type: String, trim: true, default: "" },
+
+    thresholds: {
+      rain: { type: Number, default: 15 },
+      heat: { type: Number, default: 38 },
+      aqi: { type: Number, default: 150 },
+      flood: { type: Number, default: 30 },
+      social: { type: Boolean, default: true }
+    },
+
+    enabled_factors: {
+      rain: { type: Boolean, default: true },
+      heat: { type: Boolean, default: true },
+      aqi: { type: Boolean, default: true },
+      flood: { type: Boolean, default: true },
+      social: { type: Boolean, default: true }
+    }
   },
   { timestamps: true }
 );

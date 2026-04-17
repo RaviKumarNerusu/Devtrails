@@ -36,7 +36,9 @@ export default function ClaimHistoryPage() {
   }
 
   function triggerLabel(claim) {
-    const raw = String(claim?.trigger_type || claim?.triggerType || "rain").toLowerCase();
+    const rawList = claim?.trigger_types ?? claim?.trigger_type ?? claim?.triggerType ?? [];
+    const list = Array.isArray(rawList) ? rawList : [rawList];
+    const normalized = [...new Set(list.map((item) => String(item || "").toLowerCase()).filter(Boolean))];
     const labels = {
       weather: "Rain",
       event: "Social",
@@ -46,7 +48,20 @@ export default function ClaimHistoryPage() {
       flood: "Flood",
       social: "Social"
     };
-    return labels[raw] || raw.toUpperCase();
+    const names = normalized.map((item) => labels[item] || item.toUpperCase());
+    return names.length > 0 ? names.join(" + ") : "None";
+  }
+
+  function formatThresholdActual(claim) {
+    const used = claim?.threshold_used || {};
+    const observed = claim?.factor_observations || {};
+
+    const rain = `Rain ${Number(claim?.rainMm || 0).toFixed(1)}/${Number(used?.rainfall_threshold ?? claim?.threshold ?? 0).toFixed(1)}`;
+    const heat = `Heat ${Number(observed?.temperature || 0).toFixed(1)}/${Number(used?.heat_threshold || 0).toFixed(1)}`;
+    const aqi = `AQI ${Number(observed?.aqi || 0).toFixed(0)}/${Number(used?.pollution_threshold || 0).toFixed(0)}`;
+    const flood = `Flood ${Number(claim?.rainMm || 0).toFixed(1)}/${Number(used?.flood_threshold || 0).toFixed(1)}`;
+
+    return [rain, heat, aqi, flood].join(" | ");
   }
 
   useEffect(() => {
@@ -131,8 +146,8 @@ export default function ClaimHistoryPage() {
               <tr>
                 <th>Date</th>
                 <th>City</th>
-                <th>Rain (mm)</th>
-                <th>Threshold (mm)</th>
+                <th>Triggers</th>
+                <th>Actual vs Threshold</th>
                 <th>Payout (₹)</th>
                 <th>Status</th>
               </tr>
@@ -142,8 +157,8 @@ export default function ClaimHistoryPage() {
                 <tr key={p._id}>
                   <td>{new Date(p.date || p.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</td>
                   <td>{p.city || "-"}</td>
-                  <td>{Number(p.rainMm || 0).toFixed(1)}</td>
-                  <td>{Number(p.threshold || 0).toFixed(1)}</td>
+                  <td>{triggerLabel(p)}</td>
+                  <td className="small text-muted">{formatThresholdActual(p)}</td>
                   <td>
                     ₹{Number(p.payout_amount || p.payoutAmount || p.amount || 0).toFixed(0)}
                     <div className="small text-muted">Risk: {p?.risk_score ?? p?.riskScore ?? "N/A"} · Fraud: {p?.fraud_score ?? p?.fraudScore ?? "N/A"}</div>
