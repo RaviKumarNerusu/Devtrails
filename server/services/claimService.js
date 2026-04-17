@@ -384,7 +384,11 @@ async function evaluateClaimEligibility(user, options = {}) {
     socialEvent,
     riskScore,
     locationMismatch,
-    weatherData: options?.weatherData || null
+    weatherData: {
+      ...(options?.weatherData || {}),
+      city
+    },
+    cityName: city
   });
 
   const confidence = deriveConfidenceDecision(riskScore, fraudResult.fraud_score, eligible);

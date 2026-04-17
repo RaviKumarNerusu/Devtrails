@@ -146,10 +146,22 @@ async function getFraudScore({
   socialEvent = null,
   riskScore = 0,
   locationMismatch = false,
-  weatherData = null
+  weatherData = null,
+  cityName = ""
 }) {
   if (!userId) {
     return { fraud_score: 0, should_reject: false, reasons: [], fraud_reason: "" };
+  }
+
+  const demoModeEnabled = String(process.env.DEMO_MODE || "false").trim().toLowerCase() === "true";
+  const normalizedCityName = String(cityName || weatherData?.city || weatherData?.location || "").toLowerCase();
+  if (demoModeEnabled && normalizedCityName.includes("mysore")) {
+    return {
+      fraud_score: 0,
+      fraud_reason: "demo_mode_bypass",
+      should_reject: false,
+      reasons: ["demo_mode_bypass"]
+    };
   }
 
   const now = new Date();

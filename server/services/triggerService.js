@@ -13,12 +13,12 @@ const {
 const logger = require("../utils/logger");
 
 function isDemoModeEnabled() {
-  const value = String(process.env.DEMO_MODE || "false").trim().toLowerCase();
-  return value === "true" || value === "1" || value === "yes" || value === "on";
+  return String(process.env.DEMO_MODE || "false").trim().toLowerCase() === "true";
 }
 
 function isDemoCity(city) {
-  return String(city || "").trim().toLowerCase() === "mysore";
+  const cityName = (city || "").toLowerCase();
+  return cityName.includes("mysore");
 }
 
 function getDemoWeatherOverride(city) {
@@ -26,10 +26,10 @@ function getDemoWeatherOverride(city) {
     return null;
   }
 
-  console.log("DEMO MODE ACTIVE: Mysore always raining");
+  console.log("DEMO MODE ACTIVE: Mysore forced rainfall trigger");
   return {
     rainfall: 50,
-    temperature: 28,
+    temperature: 26,
     aqi: 80,
     AQI: 80,
     condition: "Heavy Rain"
