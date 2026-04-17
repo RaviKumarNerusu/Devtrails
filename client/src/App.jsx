@@ -20,6 +20,7 @@ import AdminDashboard from "./pages/AdminDashboard.jsx";
 import AdminClaimsPage from "./pages/AdminClaimsPage.jsx";
 import AdminAnalyticsPage from "./pages/AdminAnalyticsPage.jsx";
 import AdminFraudPage from "./pages/AdminFraudPage.jsx";
+import AdminSupportPage from "./pages/AdminSupportPage.jsx";
 
 function normalizeRole(role) {
   return String(role || "").toLowerCase();
@@ -341,6 +342,7 @@ function Shell() {
         <Route path="claims" element={<AdminClaimsPage />} />
         <Route path="analytics" element={<AdminAnalyticsPage />} />
         <Route path="fraud" element={<AdminFraudPage />} />
+        <Route path="support" element={<AdminSupportPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

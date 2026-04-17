@@ -41,6 +41,9 @@ export default function AdminLayout() {
           <NavLink to="/admin/fraud" className={navClass}>
             Fraud
           </NavLink>
+          <NavLink to="/admin/support" className={navClass}>
+            Support
+          </NavLink>
         </nav>
 
         <div className="admin-sidebar-footer">

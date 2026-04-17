@@ -316,7 +316,7 @@ async function getClaimStats(req, res, next) {
  */
 async function approveClaimByAdmin(req, res, next) {
   try {
-    const claimId = req.body?.claimId;
+    const claimId = req.body?.claimId || req.body?.claim_id;
     const reason = String(req.body?.reason || "approved_by_admin").trim();
 
     if (!claimId || !Types.ObjectId.isValid(claimId)) {
@@ -412,7 +412,7 @@ async function approveClaimByAdmin(req, res, next) {
  */
 async function rejectClaimByAdmin(req, res, next) {
   try {
-    const claimId = req.body?.claimId;
+    const claimId = req.body?.claimId || req.body?.claim_id;
     const reason = String(req.body?.reason || "rejected_by_admin").trim();
 
     if (!claimId || !Types.ObjectId.isValid(claimId)) {

@@ -21,6 +21,14 @@ export default function AdminClaimsPage() {
   const [triggerFilter, setTriggerFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
+  const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+
+  const showToast = (message, type = "success") => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast((prev) => ({ ...prev, show: false }));
+    }, 2200);
+  };
 
   const loadClaims = async () => {
     const result = await getAdminClaims({ page: 1, limit: 200 });
@@ -102,11 +110,13 @@ export default function AdminClaimsPage() {
 
     try {
       await approveClaimByAdmin(claimId, "approved_from_admin_claims_page");
+      showToast("Claim Approved", "success");
     } catch (err) {
       if (previousClaim) {
         setClaims((prev) => prev.map((item) => (String(item._id) === String(claimId) ? previousClaim : item)));
       }
       setError(err?.message || "Failed to approve claim");
+      showToast("Failed to approve claim", "danger");
     } finally {
       setActioningId("");
     }
@@ -132,11 +142,13 @@ export default function AdminClaimsPage() {
 
     try {
       await rejectClaimByAdmin(claimId, "rejected_from_admin_claims_page");
+      showToast("Claim Rejected", "success");
     } catch (err) {
       if (previousClaim) {
         setClaims((prev) => prev.map((item) => (String(item._id) === String(claimId) ? previousClaim : item)));
       }
       setError(err?.message || "Failed to reject claim");
+      showToast("Failed to reject claim", "danger");
     } finally {
       setActioningId("");
     }
@@ -245,7 +257,9 @@ export default function AdminClaimsPage() {
                       <td>{formatScore(claim.risk_score)}</td>
                       <td>{formatScore(claim.fraud_score)}</td>
                       <td>{formatScore(claim.confidence_score)}</td>
-                      <td className="small">{claim.fraud_reason || "No explicit reason"}</td>
+                      <td className="small" title={claim.fraud_reason || "No explicit reason"}>
+                        {claim.fraud_reason || "No explicit reason"}
+                      </td>
                       <td>
                         <span className="badge text-bg-secondary text-capitalize">{status || "unknown"}</span>
                       </td>
@@ -257,7 +271,7 @@ export default function AdminClaimsPage() {
                             disabled={!canModerate || actioningId === claimId}
                             onClick={() => onApprove(claimId)}
                           >
-                            Approve Claim
+                            {actioningId === claimId ? "Approving..." : "Approve Claim"}
                           </button>
                           <button
                             type="button"
@@ -265,7 +279,7 @@ export default function AdminClaimsPage() {
                             disabled={!canModerate || actioningId === claimId}
                             onClick={() => onReject(claimId)}
                           >
-                            Reject Claim
+                            {actioningId === claimId ? "Rejecting..." : "Reject Claim"}
                           </button>
                         </div>
                       </td>
@@ -303,6 +317,14 @@ export default function AdminClaimsPage() {
           </div>
         </div>
       </div>
+
+      {toast.show ? (
+        <div className="position-fixed bottom-0 end-0 p-3" style={{ zIndex: 1080 }}>
+          <div className={`alert alert-${toast.type} shadow-sm mb-0`} role="alert">
+            {toast.message}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

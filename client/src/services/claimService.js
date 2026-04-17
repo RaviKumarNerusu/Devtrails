@@ -53,7 +53,7 @@ export async function getAdminClaims(params = {}) {
 export async function approveClaimByAdmin(claimId, reason = "") {
   const { data } = await api.post(
     "/admin/claim/approve",
-    { claimId, reason },
+    { claim_id: claimId, claimId, reason },
     { headers: authHeaders() }
   );
 
@@ -66,7 +66,7 @@ export async function approveClaimByAdmin(claimId, reason = "") {
 export async function rejectClaimByAdmin(claimId, reason = "") {
   const { data } = await api.post(
     "/admin/claim/reject",
-    { claimId, reason },
+    { claim_id: claimId, claimId, reason },
     { headers: authHeaders() }
   );
 

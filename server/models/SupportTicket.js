@@ -7,6 +7,9 @@ const supportTicketSchema = new mongoose.Schema(
     message: { type: String, required: true, trim: true, minlength: 5 },
     status: { type: String, enum: ["pending", "resolved"], default: "pending", index: true },
     rating: { type: Number, min: 1, max: 5 },
+    adminReply: { type: String, trim: true, default: "" },
+    adminReplyAt: { type: Date, default: null },
+    adminReplyBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }
   },
   { timestamps: true }
 );

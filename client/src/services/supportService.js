@@ -29,3 +29,13 @@ export async function updateSupportTicketStatus(ticketId, status) {
   return data?.ticket || null;
 }
 
+export async function replySupportTicket({ ticketId, reply, status = "pending" }) {
+  const { data } = await api.post("/support/reply", {
+    ticketId,
+    ticket_id: ticketId,
+    reply,
+    status
+  });
+  return data?.ticket || null;
+}
+
